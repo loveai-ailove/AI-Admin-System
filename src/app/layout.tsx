@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { Navbar } from "@/components/Navbar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Coding App",
-  description: "Next.js 16 + Prisma 7 + MySQL 8.4",
+  title: "Admin System",
+  description: "Next.js + Prisma 后台权限系统",
 };
 
 export default function RootLayout({
@@ -14,10 +13,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body className="bg-gray-50 min-h-screen">
-        <Navbar />
-        <main className="max-w-5xl mx-auto px-4 py-8">{children}</main>
-      </body>
+      <body className="min-h-screen bg-gray-50 text-[14px] text-gray-900">{children}</body>
     </html>
   );
 }

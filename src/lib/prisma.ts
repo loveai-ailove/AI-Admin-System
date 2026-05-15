@@ -8,6 +8,7 @@ const adapter = new PrismaMariaDb({
   user: process.env.DATABASE_USER || "root",
   password: process.env.DATABASE_PASSWORD || "",
   database: process.env.DATABASE_NAME || "ai_coding",
+  allowPublicKeyRetrieval: true,
 });
 
 const globalForPrisma = globalThis as unknown as {

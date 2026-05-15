@@ -7,12 +7,133 @@ datasource db {
   provider = "mysql"
 }
 
-model User {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+enum Status {
+  ACTIVE
+  DISABLED
+}
 
-  @@map("users")
+enum MenuType {
+  DIRECTORY
+  MENU
+  BUTTON
+}
+
+model SysDept {
+  id        Int       @id @default(autoincrement())
+  parentId  Int?      @map("parent_id")
+  ancestors String    @default("0")
+  name      String
+  orderNum  Int       @default(0) @map("order_num")
+  leader    String?
+  phone     String?   @db.VarChar(20)
+  email     String?
+  status    Status    @default(ACTIVE)
+  remark    String?   @db.Text
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  parent    SysDept?  @relation("SysDeptTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  SysDept[] @relation("SysDeptTree")
+  users     SysUser[]
+
+  @@index([parentId])
+  @@map("sys_dept")
+}
+
+model SysRole {
+  id        Int           @id @default(autoincrement())
+  name      String
+  code      String        @unique
+  orderNum  Int           @default(0) @map("order_num")
+  status    Status        @default(ACTIVE)
+  remark    String?       @db.Text
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+  users     SysUserRole[]
+  menus     SysRoleMenu[]
+
+  @@map("sys_role")
+}
+
+model SysMenu {
+  id        Int         @id @default(autoincrement())
+  parentId  Int?        @map("parent_id")
+  name      String
+  type      MenuType
+  path      String?
+  component String?
+  perms     String?
+  icon      String?
+  orderNum  Int         @default(0) @map("order_num")
+  visible   Boolean     @default(true)
+  status    Status      @default(ACTIVE)
+  remark    String?     @db.Text
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  parent    SysMenu?    @relation("SysMenuTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  SysMenu[]   @relation("SysMenuTree")
+  roles     SysRoleMenu[]
+
+  @@index([parentId])
+  @@map("sys_menu")
+}
+
+model SysUser {
+  id          Int              @id @default(autoincrement())
+  username    String           @unique
+  nickname    String
+  passwordHash String          @map("password_hash")
+  email       String?          @unique
+  mobile      String?          @unique @db.VarChar(20)
+  deptId      Int?             @map("dept_id")
+  status      Status           @default(ACTIVE)
+  isAdmin     Boolean          @default(false) @map("is_admin")
+  lastLoginAt DateTime?        @map("last_login_at")
+  lastLoginIp String?          @map("last_login_ip")
+  remark      String?          @db.Text
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  dept        SysDept?         @relation(fields: [deptId], references: [id], onDelete: SetNull)
+  roles       SysUserRole[]
+  sessions    SysUserSession[]
+
+  @@index([deptId])
+  @@map("sys_user")
+}
+
+model SysUserRole {
+  userId Int
+  roleId Int
+  user   SysUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   SysRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("sys_user_role")
+}
+
+model SysRoleMenu {
+  roleId Int
+  menuId Int
+  role   SysRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  menu   SysMenu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, menuId])
+  @@index([menuId])
+  @@map("sys_role_menu")
+}
+
+model SysUserSession {
+  id           String   @id @default(cuid())
+  userId       Int      @map("user_id")
+  token        String   @unique
+  expiresAt    DateTime @map("expires_at")
+  lastAccessAt DateTime @default(now()) @map("last_access_at")
+  ip           String?
+  userAgent    String?  @map("user_agent")
+  createdAt    DateTime @default(now()) @map("created_at")
+  user         SysUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sys_user_session")
 }
