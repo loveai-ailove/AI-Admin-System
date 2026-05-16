@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { Prisma } from "@/generated/prisma/client";
+import { Prisma, OperType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { hashPassword } from "@/lib/auth/password";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { normalizeOptional } from "@/lib/validators/common";
 import { systemUserSchema } from "@/lib/validators/system-user";
+import { logOperation } from "@/lib/logger";
 
 async function ensureUniqueUserFields(params: {
   username: string;
@@ -36,20 +37,42 @@ async function ensureUniqueUserFields(params: {
   if (params.mobile && existing.mobile === params.mobile) throw new Error("手机号已存在");
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     await requireApiPermission("system:user:list");
 
-    const users = await prisma.sysUser.findMany({
-      include: {
-        dept: true,
-        roles: { include: { role: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const { searchParams } = new URL(request.url);
+    const page = parseInt(searchParams.get("page") || "1");
+    const pageSize = parseInt(searchParams.get("pageSize") || "10");
+    const username = searchParams.get("username");
+    const status = searchParams.get("status");
+    const deptIdParam = searchParams.get("deptId");
 
-    return NextResponse.json(
-      users.map((item) => ({
+    const where: any = {};
+    if (username) where.username = { contains: username };
+    if (status) where.status = status;
+    if (deptIdParam) {
+      const deptIds = deptIdParam.split(",").map(Number).filter((id) => !Number.isNaN(id));
+      where.deptId = { in: deptIds };
+    }
+
+    const [total, users] = await Promise.all([
+      prisma.sysUser.count({ where }),
+      prisma.sysUser.findMany({
+        where,
+        include: {
+          dept: true,
+          roles: { include: { role: true } },
+        },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+
+    return NextResponse.json({
+      total,
+      list: users.map((item) => ({
         id: item.id,
         username: item.username,
         nickname: item.nickname,
@@ -61,9 +84,9 @@ export async function GET() {
         roleNames: item.roles.map((role) => role.role.name),
         status: item.status,
         isAdmin: item.isAdmin,
-        createdAt: item.createdAt,
-      }))
-    );
+        createdAt: item.createdAt.toLocaleDateString("zh-CN"),
+      })),
+    });
   } catch (error) {
     return handleApiError(error, "获取系统用户列表失败");
   }
@@ -96,7 +119,7 @@ export async function POST(request: Request) {
           mobile,
           deptId: body.deptId ?? null,
           status: body.status,
-          isAdmin: body.isAdmin,
+          isAdmin: false,
           remark,
         },
       });
@@ -108,6 +131,14 @@ export async function POST(request: Request) {
       }
 
       return created;
+    });
+
+    await logOperation({
+      request,
+      module: "用户管理",
+      operType: OperType.CREATE,
+      description: `新增用户: ${user.username}`,
+      requestParam: JSON.stringify(body),
     });
 
     return NextResponse.json(user, { status: 201 });

@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
+import { OperType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { normalizeOptional } from "@/lib/validators/common";
 import { systemDeptSchema } from "@/lib/validators/system-dept";
 import { assertDeptMoveAllowed, cascadeDeptAncestors, resolveDeptAncestors } from "@/lib/system/dept";
+import { logOperation } from "@/lib/logger";
 
 function parseId(id: string) {
   const value = Number(id);
@@ -70,6 +72,14 @@ export async function PUT(
       }
     });
 
+    await logOperation({
+      request,
+      module: "部门管理",
+      operType: OperType.UPDATE,
+      description: `修改部门: ${existing.name}`,
+      requestParam: JSON.stringify(body),
+    });
+
     return NextResponse.json({ message: "更新成功" });
   } catch (error) {
     return handleApiError(error, "更新部门失败");
@@ -77,7 +87,7 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -96,6 +106,14 @@ export async function DELETE(
     if (userCount > 0) throw new Error("该部门下仍有用户，不能删除");
 
     await prisma.sysDept.delete({ where: { id: deptId } });
+
+    await logOperation({
+      request,
+      module: "部门管理",
+      operType: OperType.DELETE,
+      description: `删除部门: ${dept.name}`,
+    });
+
     return NextResponse.json({ message: "删除成功" });
   } catch (error) {
     return handleApiError(error, "删除部门失败");

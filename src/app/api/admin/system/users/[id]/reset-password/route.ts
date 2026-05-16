@@ -4,6 +4,9 @@ import { handleApiError } from "@/lib/api";
 import { hashPassword } from "@/lib/auth/password";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { resetPasswordSchema } from "@/lib/validators/profile";
+import { listUserSessionTokens } from "@/lib/auth/session";
+import { logOperation, updateLogoutTimeBySessionTokens } from "@/lib/logger";
+import { OperType } from "@/generated/prisma/client";
 
 function parseId(id: string) {
   const value = Number(id);
@@ -28,11 +31,29 @@ export async function POST(
       throw new Error("NOT_FOUND");
     }
 
-    await prisma.sysUser.update({
-      where: { id: userId },
-      data: {
-        passwordHash: await hashPassword(body.newPassword),
-      },
+    const sessionTokens = await listUserSessionTokens(userId);
+    const passwordHash = await hashPassword(body.newPassword);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.sysUser.update({
+        where: { id: userId },
+        data: {
+          passwordHash,
+        },
+      });
+
+      await tx.sysUserSession.deleteMany({
+        where: { userId },
+      });
+    });
+
+    await updateLogoutTimeBySessionTokens(sessionTokens);
+    await logOperation({
+      request,
+      module: "用户管理",
+      operType: OperType.UPDATE,
+      description: `重置用户密码: ${user.username}`,
+      requestParam: JSON.stringify(body),
     });
 
     return NextResponse.json({ message: "密码重置成功" });

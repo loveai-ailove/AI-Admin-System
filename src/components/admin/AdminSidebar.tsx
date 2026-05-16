@@ -5,7 +5,11 @@ import { usePathname } from "next/navigation";
 import type { SidebarMenuItem } from "@/types/system";
 
 function SidebarNode({ item, pathname }: { item: SidebarMenuItem; pathname: string }) {
-  const isActive = item.path ? pathname === item.path || pathname.startsWith(`${item.path}/`) : false;
+  const isActive = item.path
+    ? item.path === "/admin"
+      ? pathname === "/admin"
+      : pathname === item.path || pathname.startsWith(`${item.path}/`)
+    : false;
 
   return (
     <div className="space-y-1">

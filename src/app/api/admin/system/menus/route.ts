@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { OperType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { normalizeOptional } from "@/lib/validators/common";
 import { systemMenuSchema } from "@/lib/validators/system-menu";
+import { logOperation } from "@/lib/logger";
 
 export async function GET() {
   try {
@@ -34,6 +36,14 @@ export async function POST(request: Request) {
         status: body.status,
         remark: normalizeOptional(body.remark),
       },
+    });
+
+    await logOperation({
+      request,
+      module: "菜单管理",
+      operType: OperType.CREATE,
+      description: `新增菜单: ${created.name}`,
+      requestParam: JSON.stringify(body),
     });
 
     return NextResponse.json(created, { status: 201 });

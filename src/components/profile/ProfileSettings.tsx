@@ -79,8 +79,10 @@ export function ProfileSettings({ profile }: { profile: ProfilePayload }) {
       if (!response.ok) {
         throw new Error(data.error || "修改密码失败");
       }
-      setPasswordMessage("密码已修改，请使用新密码重新登录时注意更新凭据");
+      setPasswordMessage(data.message || "密码已修改，请重新登录");
       setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      router.push("/login");
+      router.refresh();
     } catch (error) {
       setPasswordError(error instanceof Error ? error.message : "修改密码失败");
     } finally {

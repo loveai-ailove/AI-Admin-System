@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
+import { OperType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { hashPassword } from "@/lib/auth/password";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { normalizeOptional } from "@/lib/validators/common";
 import { systemUserSchema } from "@/lib/validators/system-user";
+import { logOperation } from "@/lib/logger";
 
 function parseId(id: string) {
   const value = Number(id);
@@ -89,6 +91,14 @@ export async function PUT(
 
     await ensureUniqueFields(userId, body.username, email, mobile);
 
+    if (!body.deptId) {
+      throw new Error("用户必须分配部门");
+    }
+
+    if (body.roleIds.length === 0) {
+      throw new Error("用户必须至少分配一个角色");
+    }
+
     if (currentUser.id === userId && body.status === "DISABLED") {
       throw new Error("不能禁用当前登录用户");
     }
@@ -103,7 +113,6 @@ export async function PUT(
           mobile,
           deptId: body.deptId ?? null,
           status: body.status,
-          isAdmin: body.isAdmin,
           remark,
           passwordHash: body.password ? await hashPassword(body.password) : existingUser.passwordHash,
         },
@@ -118,6 +127,14 @@ export async function PUT(
       }
     });
 
+    await logOperation({
+      request,
+      module: "用户管理",
+      operType: OperType.UPDATE,
+      description: `修改用户: ${existingUser.username}`,
+      requestParam: JSON.stringify(body),
+    });
+
     return NextResponse.json({ message: "更新成功" });
   } catch (error) {
     return handleApiError(error, "更新系统用户失败");
@@ -125,7 +142,7 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -137,8 +154,16 @@ export async function DELETE(
       throw new Error("不能删除当前登录用户");
     }
 
-    await ensureUserExists(userId);
+    const user = await ensureUserExists(userId);
     await prisma.sysUser.delete({ where: { id: userId } });
+
+    await logOperation({
+      request,
+      module: "用户管理",
+      operType: OperType.DELETE,
+      description: `删除用户: ${user.username}`,
+    });
+
     return NextResponse.json({ message: "删除成功" });
   } catch (error) {
     return handleApiError(error, "删除系统用户失败");

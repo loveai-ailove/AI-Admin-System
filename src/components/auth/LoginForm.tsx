@@ -1,36 +1,78 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import SlideCaptcha from "./SlideCaptcha";
 
 export function LoginForm({ canBootstrap }: { canBootstrap: boolean }) {
   const router = useRouter();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("Admin123!");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
   const [loading, setLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
 
+  // 验证码相关状态
+  const [captchaId, setCaptchaId] = useState<string | null>(null);
+  const [captchaOffsetX, setCaptchaOffsetX] = useState<number | null>(null);
+  const [captchaStatus, setCaptchaStatus] = useState<"idle" | "success" | "fail">("idle");
+  const [captchaRefreshNonce, setCaptchaRefreshNonce] = useState(0);
+
+  // 监听验证码组件加载完成，获取 captchaId
+  const handleCaptchaReady = useCallback((id: string) => {
+    setCaptchaId(id);
+    setCaptchaOffsetX(null);
+    setCaptchaStatus("idle");
+  }, []);
+
+  const handleCaptchaComplete = useCallback((offsetX: number | null) => {
+    setCaptchaOffsetX(offsetX);
+    setCaptchaStatus("idle");
+  }, []);
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setLoading(true);
     setError("");
     setHint("");
+
+    if (captchaOffsetX === null) {
+      setError("请先完成验证码验证");
+      return;
+    }
+
+    if (!captchaId) {
+      setError("验证码已过期，请刷新");
+      return;
+    }
+
+    setLoading(true);
+    setCaptchaOffsetX(null);
 
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({
+          username,
+          password,
+          captchaId,
+          captchaOffsetX,
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
+        if (data.captchaError) {
+          setCaptchaStatus("fail");
+        } else {
+          setCaptchaRefreshNonce((current) => current + 1);
+        }
         throw new Error(data.error || "登录失败");
       }
 
+      setCaptchaStatus("success");
       router.push("/admin");
       router.refresh();
     } catch (caughtError) {
@@ -66,8 +108,8 @@ export function LoginForm({ canBootstrap }: { canBootstrap: boolean }) {
   return (
     <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg">
       <div className="mb-8 text-center">
-        <h1 className="text-3xl font-bold text-gray-900">后台登录</h1>
-        <p className="mt-2 text-sm text-gray-500">Next.js + Prisma 权限系统第一版</p>
+        <h1 className="text-3xl font-bold text-gray-900">管理平台登录</h1>
+        <p className="mt-2 text-sm text-gray-500">(1.0版)</p>
       </div>
 
       <form className="space-y-4" onSubmit={handleSubmit}>
@@ -95,9 +137,19 @@ export function LoginForm({ canBootstrap }: { canBootstrap: boolean }) {
           />
         </div>
 
+        {/* 滑动验证码 */}
+        <div className="mb-2">
+          <SlideCaptcha
+            onComplete={handleCaptchaComplete}
+            onReady={handleCaptchaReady}
+            verificationStatus={captchaStatus}
+            refreshNonce={captchaRefreshNonce}
+          />
+        </div>
+
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || captchaOffsetX === null}
           className="w-full rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? "登录中..." : "登录"}

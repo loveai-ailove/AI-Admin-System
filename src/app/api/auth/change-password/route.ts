@@ -4,6 +4,9 @@ import { handleApiError } from "@/lib/api";
 import { verifyPassword, hashPassword } from "@/lib/auth/password";
 import { changePasswordSchema } from "@/lib/validators/profile";
 import { requireApiPermission } from "@/lib/auth/api-auth";
+import { clearSession, listUserSessionTokens } from "@/lib/auth/session";
+import { logOperation, updateLogoutTimeBySessionTokens } from "@/lib/logger";
+import { OperType } from "@/generated/prisma/client";
 
 export async function POST(request: Request) {
   try {
@@ -20,15 +23,32 @@ export async function POST(request: Request) {
       throw new Error("当前密码不正确");
     }
 
+    const sessionTokens = await listUserSessionTokens(currentUser.id);
     const passwordHash = await hashPassword(body.newPassword);
-    await prisma.sysUser.update({
-      where: { id: currentUser.id },
-      data: {
-        passwordHash,
-      },
+    await prisma.$transaction(async (tx) => {
+      await tx.sysUser.update({
+        where: { id: currentUser.id },
+        data: {
+          passwordHash,
+        },
+      });
+
+      await tx.sysUserSession.deleteMany({
+        where: { userId: currentUser.id },
+      });
     });
 
-    return NextResponse.json({ message: "密码修改成功" });
+    await updateLogoutTimeBySessionTokens(sessionTokens);
+    await logOperation({
+      request,
+      module: "个人中心",
+      operType: OperType.UPDATE,
+      description: `修改个人密码: ${currentUser.username}`,
+      requestParam: JSON.stringify(body),
+    });
+    await clearSession();
+
+    return NextResponse.json({ message: "密码修改成功，请重新登录" });
   } catch (error) {
     return handleApiError(error, "修改密码失败");
   }

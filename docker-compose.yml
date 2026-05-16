@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: ai-coding-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-PASSWORD}
+      MYSQL_DATABASE: ${DATABASE_NAME:-ai_coding}
+      MYSQL_USER: ${DATABASE_USER:-root}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD:-PASSWORD}
+    ports:
+      - "${DATABASE_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:

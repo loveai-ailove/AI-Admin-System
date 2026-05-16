@@ -10,6 +10,9 @@ const segmentLabelMap: Record<string, string> = {
   roles: "角色管理",
   menus: "菜单管理",
   depts: "部门管理",
+  logs: "日志管理",
+  oper: "操作日志",
+  login: "登录日志",
   profile: "个人中心",
 };
 

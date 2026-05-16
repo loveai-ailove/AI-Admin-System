@@ -80,6 +80,44 @@ async function createDefaultMenus(tx: PrismaClient) {
     },
   });
 
+  const logRoot = await tx.sysMenu.create({
+    data: {
+      name: "日志管理",
+      type: MenuType.DIRECTORY,
+      path: "/admin/logs",
+      component: "admin/logs",
+      icon: "file-text",
+      orderNum: 2,
+      status: Status.ACTIVE,
+    },
+  });
+
+  const operLogMenu = await tx.sysMenu.create({
+    data: {
+      parentId: logRoot.id,
+      name: "操作日志",
+      type: MenuType.MENU,
+      path: "/admin/logs/oper",
+      component: "admin/logs/oper/page",
+      perms: "log:oper:list",
+      orderNum: 1,
+      status: Status.ACTIVE,
+    },
+  });
+
+  const loginLogMenu = await tx.sysMenu.create({
+    data: {
+      parentId: logRoot.id,
+      name: "登录日志",
+      type: MenuType.MENU,
+      path: "/admin/logs/login",
+      component: "admin/logs/login/page",
+      perms: "log:login:list",
+      orderNum: 2,
+      status: Status.ACTIVE,
+    },
+  });
+
   const buttonConfigs = [
     [userMenu.id, "用户新增", "system:user:create"],
     [userMenu.id, "用户修改", "system:user:update"],
@@ -93,6 +131,10 @@ async function createDefaultMenus(tx: PrismaClient) {
     [deptMenu.id, "部门新增", "system:dept:create"],
     [deptMenu.id, "部门修改", "system:dept:update"],
     [deptMenu.id, "部门删除", "system:dept:delete"],
+    [operLogMenu.id, "操作日志删除", "log:oper:delete"],
+    [operLogMenu.id, "操作日志导出", "log:oper:export"],
+    [loginLogMenu.id, "登录日志删除", "log:login:delete"],
+    [loginLogMenu.id, "登录日志导出", "log:login:export"],
   ] as const;
 
   const buttonMenus = [] as number[];
@@ -113,7 +155,7 @@ async function createDefaultMenus(tx: PrismaClient) {
     buttonMenus.push(button.id);
   }
 
-  return [dashboard.id, systemRoot.id, userMenu.id, roleMenu.id, menuMenu.id, deptMenu.id, ...buttonMenus];
+  return [dashboard.id, systemRoot.id, userMenu.id, roleMenu.id, menuMenu.id, deptMenu.id, logRoot.id, operLogMenu.id, loginLogMenu.id, ...buttonMenus];
 }
 
 export async function bootstrapSystem() {

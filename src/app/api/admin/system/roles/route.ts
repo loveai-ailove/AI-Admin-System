@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { OperType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { normalizeOptional } from "@/lib/validators/common";
 import { systemRoleSchema } from "@/lib/validators/system-role";
+import { logOperation } from "@/lib/logger";
 
 export async function GET() {
   try {
@@ -46,6 +48,14 @@ export async function POST(request: Request) {
       }
 
       return created;
+    });
+
+    await logOperation({
+      request,
+      module: "角色管理",
+      operType: OperType.CREATE,
+      description: `新增角色: ${role.name}`,
+      requestParam: JSON.stringify(body),
     });
 
     return NextResponse.json(role, { status: 201 });

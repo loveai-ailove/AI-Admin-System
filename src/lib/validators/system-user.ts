@@ -9,7 +9,6 @@ export const systemUserSchema = z.object({
   mobile: z.union([z.string().trim().max(20, "手机号最多 20 位"), z.literal(""), z.null()]).optional(),
   deptId: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
   status: statusSchema.default("ACTIVE"),
-  isAdmin: z.coerce.boolean().default(false),
   roleIds: z.array(z.coerce.number().int().positive()).default([]),
   remark: z.union([z.string().trim().max(500, "备注最多 500 位"), z.literal(""), z.null()]).optional(),
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { TreeSelect } from "@/components/ui/TreeSelect";
@@ -16,7 +16,6 @@ type UserRecord = {
   roleIds: number[];
   roleNames: string[];
   status: "ACTIVE" | "DISABLED";
-  isAdmin: boolean;
   createdAt: string;
 };
 
@@ -47,7 +46,6 @@ type UserFormState = {
   mobile: string;
   deptId: string;
   status: "ACTIVE" | "DISABLED";
-  isAdmin: boolean;
   roleIds: number[];
   remark: string;
 };
@@ -60,7 +58,6 @@ const emptyForm: UserFormState = {
   mobile: "",
   deptId: "",
   status: "ACTIVE" as const,
-  isAdmin: false,
   roleIds: [] as number[],
   remark: "",
 };
@@ -68,17 +65,17 @@ const emptyForm: UserFormState = {
 const PAGE_SIZE = 10;
 
 export function SystemUserManager({
-  users,
   depts,
   roles,
   permissions,
 }: {
-  users: UserRecord[];
   depts: DeptOption[];
   roles: RoleOption[];
   permissions: { create: boolean; update: boolean; delete: boolean };
 }) {
   const router = useRouter();
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [total, setTotal] = useState(0);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState<UserFormState>(emptyForm);
@@ -88,14 +85,15 @@ export function SystemUserManager({
   const [listStatusFilter, setListStatusFilter] = useState<"ALL" | UserRecord["status"]>("ALL");
   const [listDeptFilter, setListDeptFilter] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
-  const createFormValidationMessage =
-    editingId !== null
-      ? ""
-      : !form.deptId || form.roleIds.length === 0
-        ? "新增用户时必须分配部门和角色。"
-        : !form.password
-          ? "新增用户时必须填写密码。"
-          : "";
+  const formValidationMessage = useMemo(() => {
+    if (!form.deptId || form.roleIds.length === 0) {
+      return "用户必须分配部门和角色。";
+    }
+    if (editingId === null && !form.password) {
+      return "新增用户时必须填写密码。";
+    }
+    return "";
+  }, [editingId, form.deptId, form.roleIds, form.password]);
 
   const deptTree = useMemo(() => {
     const nodeMap = new Map<number, DeptTreeNode>();
@@ -134,37 +132,43 @@ export function SystemUserManager({
     return null;
   }
 
-  const filteredUsers = useMemo(() => {
-    const normalizedKeyword = listKeyword.trim().toLowerCase();
-
-    return users.filter((user) => {
-      const matchesKeyword =
-        !normalizedKeyword ||
-        user.username.toLowerCase().includes(normalizedKeyword) ||
-        user.nickname.toLowerCase().includes(normalizedKeyword) ||
-        (user.email ?? "").toLowerCase().includes(normalizedKeyword) ||
-        (user.mobile ?? "").toLowerCase().includes(normalizedKeyword);
-      const matchesStatus = listStatusFilter === "ALL" || user.status === listStatusFilter;
-
-      let matchesDept = true;
+  const fetchUsers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: currentPage.toString(),
+        pageSize: PAGE_SIZE.toString(),
+      });
+      if (listKeyword) params.set("username", listKeyword);
+      if (listStatusFilter !== "ALL") params.set("status", listStatusFilter);
       if (listDeptFilter) {
         const deptId = Number(listDeptFilter);
         const deptNode = findDeptNode(deptTree, deptId);
         if (deptNode) {
-          const deptIds = collectDeptIds(deptNode);
-          matchesDept = user.deptId !== null && deptIds.includes(user.deptId);
+          params.set("deptId", collectDeptIds(deptNode).join(","));
+        } else {
+          params.set("deptId", String(deptId));
         }
       }
 
-      return matchesKeyword && matchesStatus && matchesDept;
-    });
-  }, [listKeyword, listStatusFilter, listDeptFilter, users, deptTree]);
+      const res = await fetch(`/api/admin/system/users?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setUsers(data.list);
+        setTotal(data.total);
+      }
+    } catch (error) {
+      console.error("获取用户列表失败:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage, listKeyword, listStatusFilter, listDeptFilter, deptTree]);
 
-  const totalPages = Math.ceil(filteredUsers.length / PAGE_SIZE);
-  const paginatedUsers = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filteredUsers.slice(start, start + PAGE_SIZE);
-  }, [filteredUsers, currentPage]);
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   function resetListFilters() {
     setListKeyword("");
@@ -202,7 +206,6 @@ export function SystemUserManager({
       mobile: user.mobile ?? "",
       deptId: user.deptId ? String(user.deptId) : "",
       status: user.status,
-      isAdmin: user.isAdmin,
       roleIds: user.roleIds,
       remark: "",
     });
@@ -223,8 +226,8 @@ export function SystemUserManager({
     setError("");
 
     try {
-      if (createFormValidationMessage) {
-        throw new Error(createFormValidationMessage);
+      if (formValidationMessage) {
+        throw new Error(formValidationMessage);
       }
 
       setLoading(true);
@@ -237,7 +240,6 @@ export function SystemUserManager({
         mobile: form.mobile || null,
         deptId: form.deptId ? Number(form.deptId) : null,
         status: form.status,
-        isAdmin: form.isAdmin,
         roleIds: form.roleIds,
         remark: form.remark || null,
       };
@@ -377,7 +379,7 @@ export function SystemUserManager({
           </label>
         </div>
         <div className="mt-4 flex items-center justify-between gap-3">
-          <div className="text-sm text-gray-500">当前筛选结果：{filteredUsers.length} 个用户</div>
+          <div className="text-sm text-gray-500">总共 {total} 个用户</div>
           <button
             type="button"
             onClick={resetListFilters}
@@ -402,7 +404,11 @@ export function SystemUserManager({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">
-            {paginatedUsers.map((user) => (
+            {loading ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">加载中...</td>
+              </tr>
+            ) : users.map((user) => (
               <tr key={user.id}>
                 <td className="px-4 py-3 font-medium text-gray-900">{user.username}</td>
                 <td className="px-4 py-3">{user.nickname}</td>
@@ -438,12 +444,12 @@ export function SystemUserManager({
         </table>
       </div>
 
-      {filteredUsers.length === 0 ? (
+      {!loading && users.length === 0 ? (
         <div className="text-sm text-gray-500">当前筛选条件下暂无用户。</div>
-      ) : totalPages > 1 ? (
+      ) : !loading && totalPages > 1 ? (
         <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-100">
           <div className="text-sm text-gray-500">
-            共 {filteredUsers.length} 条记录，第 {currentPage}/{totalPages} 页
+            共 {total} 条记录，第 {currentPage}/{totalPages} 页
           </div>
           <div className="flex items-center gap-1">
             <button
@@ -494,8 +500,8 @@ export function SystemUserManager({
       >
         <form onSubmit={handleSubmit}>
           {error ? <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-600">{error}</div> : null}
-          {createFormValidationMessage ? (
-            <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-700">{createFormValidationMessage}</div>
+          {formValidationMessage ? (
+            <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-700">{formValidationMessage}</div>
           ) : null}
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -563,14 +569,6 @@ export function SystemUserManager({
                 <option value="DISABLED">禁用</option>
               </select>
             </label>
-            <label className="flex items-center gap-2 pt-7 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={form.isAdmin}
-                onChange={(event) => setForm({ ...form, isAdmin: event.target.checked })}
-              />
-              超级管理员
-            </label>
           </div>
 
           <div className="mt-4">
@@ -610,7 +608,7 @@ export function SystemUserManager({
             </button>
             <button
               type="submit"
-              disabled={loading || Boolean(createFormValidationMessage)}
+              disabled={loading || Boolean(formValidationMessage)}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
             >
               {loading ? "保存中..." : editingId ? "更新用户" : "创建用户"}

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { OperType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { normalizeOptional } from "@/lib/validators/common";
 import { systemMenuSchema } from "@/lib/validators/system-menu";
+import { logOperation } from "@/lib/logger";
 
 function parseId(id: string) {
   const value = Number(id);
@@ -59,6 +61,14 @@ export async function PUT(
       },
     });
 
+    await logOperation({
+      request,
+      module: "菜单管理",
+      operType: OperType.UPDATE,
+      description: `修改菜单: ${existing.name}`,
+      requestParam: JSON.stringify(body),
+    });
+
     return NextResponse.json({ message: "更新成功" });
   } catch (error) {
     return handleApiError(error, "更新菜单失败");
@@ -66,7 +76,7 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -85,6 +95,14 @@ export async function DELETE(
     if (roleCount > 0) throw new Error("该菜单已分配给角色，不能删除");
 
     await prisma.sysMenu.delete({ where: { id: menuId } });
+
+    await logOperation({
+      request,
+      module: "菜单管理",
+      operType: OperType.DELETE,
+      description: `删除菜单: ${menu.name}`,
+    });
+
     return NextResponse.json({ message: "删除成功" });
   } catch (error) {
     return handleApiError(error, "删除菜单失败");

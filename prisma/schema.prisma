@@ -95,6 +95,8 @@ model SysUser {
   dept        SysDept?         @relation(fields: [deptId], references: [id], onDelete: SetNull)
   roles       SysUserRole[]
   sessions    SysUserSession[]
+  operLogs    SysOperLog[]
+  loginLogs   SysLoginLog[]
 
   @@index([deptId])
   @@map("sys_user")
@@ -136,4 +138,64 @@ model SysUserSession {
   @@index([userId])
   @@index([expiresAt])
   @@map("sys_user_session")
+}
+
+enum OperType {
+  CREATE
+  UPDATE
+  DELETE
+  QUERY
+  IMPORT
+  EXPORT
+  LOGIN
+  LOGOUT
+  OTHER
+}
+
+enum LoginStatus {
+  SUCCESS
+  FAIL
+}
+
+model SysOperLog {
+  id            Int       @id @default(autoincrement())
+  userId        Int?      @map("user_id")
+  username      String?
+  module        String    @db.VarChar(50)
+  operType      OperType  @map("oper_type")
+  description   String?   @db.VarChar(500)
+  method        String?   @db.VarChar(10)
+  requestUrl    String?   @map("request_url")
+  requestParam  String?   @map("request_param") @db.Text
+  response      String?   @db.Text
+  ip            String?   @db.VarChar(50)
+  status        Status    @default(ACTIVE)
+  errorMsg      String?   @map("error_msg") @db.Text
+  operTime      DateTime  @default(now()) @map("oper_time")
+  costTime      Int?      @map("cost_time")
+  user          SysUser?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([operTime])
+  @@index([module])
+  @@map("sys_oper_log")
+}
+
+model SysLoginLog {
+  id          Int         @id @default(autoincrement())
+  userId      Int?        @map("user_id")
+  sessionToken String?    @unique @map("session_token")
+  username    String?     @db.VarChar(50)
+  ip          String?     @db.VarChar(50)
+  userAgent   String?     @map("user_agent")
+  status      LoginStatus @default(SUCCESS)
+  loginTime   DateTime    @default(now()) @map("login_time")
+  logoutTime  DateTime?   @map("logout_time")
+  msg         String?     @db.VarChar(500)
+  user        SysUser?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([loginTime])
+  @@index([username])
+  @@map("sys_login_log")
 }

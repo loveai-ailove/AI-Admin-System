@@ -4,6 +4,8 @@ import { handleApiError } from "@/lib/api";
 import { normalizeOptional } from "@/lib/validators/common";
 import { profileUpdateSchema } from "@/lib/validators/profile";
 import { requireApiPermission } from "@/lib/auth/api-auth";
+import { logOperation } from "@/lib/logger";
+import { OperType } from "@/generated/prisma/client";
 
 export async function GET() {
   try {
@@ -66,6 +68,14 @@ export async function PUT(request: Request) {
         mobile,
         remark,
       },
+    });
+
+    await logOperation({
+      request,
+      module: "个人中心",
+      operType: OperType.UPDATE,
+      description: `更新个人资料: ${currentUser.username}`,
+      requestParam: JSON.stringify(body),
     });
 
     return NextResponse.json({ message: "个人信息已更新" });

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { OperType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { normalizeOptional } from "@/lib/validators/common";
 import { systemRoleSchema } from "@/lib/validators/system-role";
+import { logOperation } from "@/lib/logger";
 
 function parseId(id: string) {
   const value = Number(id);
@@ -78,6 +80,14 @@ export async function PUT(
       }
     });
 
+    await logOperation({
+      request,
+      module: "角色管理",
+      operType: OperType.UPDATE,
+      description: `修改角色: ${role.name}`,
+      requestParam: JSON.stringify(body),
+    });
+
     return NextResponse.json({ message: "更新成功" });
   } catch (error) {
     return handleApiError(error, "更新角色失败");
@@ -85,7 +95,7 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -107,6 +117,14 @@ export async function DELETE(
     }
 
     await prisma.sysRole.delete({ where: { id: roleId } });
+
+    await logOperation({
+      request,
+      module: "角色管理",
+      operType: OperType.DELETE,
+      description: `删除角色: ${role.name}`,
+    });
+
     return NextResponse.json({ message: "删除成功" });
   } catch (error) {
     return handleApiError(error, "删除角色失败");

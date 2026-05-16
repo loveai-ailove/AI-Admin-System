@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+@theme {
+  --text-xs: 0.625rem;      /* 原 0.75rem (12px) → 10px */
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.75rem;       /* 原 0.875rem (14px) → 12px */
+  --text-sm--line-height: 1.125rem;
+  --text-base: 0.875rem;    /* 原 1rem (16px) → 14px */
+  --text-base--line-height: 1.25rem;
+  --text-lg: 1rem;          /* 原 1.125rem (18px) → 16px */
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.125rem;      /* 原 1.25rem (20px) → 18px */
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.25rem;      /* 原 1.5rem (24px) → 20px */
+  --text-2xl--line-height: 1.75rem;
+  --text-3xl: 1.5rem;       /* 原 1.875rem (30px) → 24px */
+  --text-3xl--line-height: 2rem;
+}

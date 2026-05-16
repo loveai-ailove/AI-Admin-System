@@ -43,8 +43,25 @@ export async function clearSession() {
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
 
   if (token) {
-    await prisma.sysUserSession.deleteMany({ where: { token } });
+    await invalidateSessionByToken(token);
   }
 
   cookieStore.delete(SESSION_COOKIE_NAME);
+}
+
+export async function invalidateSessionByToken(token: string) {
+  await prisma.sysUserSession.deleteMany({ where: { token } });
+}
+
+export async function invalidateUserSessions(userId: number) {
+  await prisma.sysUserSession.deleteMany({ where: { userId } });
+}
+
+export async function listUserSessionTokens(userId: number) {
+  const sessions = await prisma.sysUserSession.findMany({
+    where: { userId },
+    select: { token: true },
+  });
+
+  return sessions.map((session) => session.token);
 }
