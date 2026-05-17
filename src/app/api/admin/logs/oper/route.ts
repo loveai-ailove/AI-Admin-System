@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma, OperType, Status } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
@@ -17,11 +18,11 @@ export async function GET(request: Request) {
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
 
-    const where: any = {};
+    const where: Prisma.SysOperLogWhereInput = {};
     if (username) where.username = { contains: username };
     if (module) where.module = module;
-    if (operType) where.operType = operType;
-    if (status) where.status = status;
+    if (operType) where.operType = operType as OperType;
+    if (status) where.status = status as Status;
     if (startTime || endTime) {
       where.operTime = {};
       if (startTime) where.operTime.gte = new Date(startTime);

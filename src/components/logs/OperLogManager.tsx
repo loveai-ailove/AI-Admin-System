@@ -183,18 +183,18 @@ export function OperLogManager() {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">操作人员</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">操作类型</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">描述</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">请求地址</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">状态</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">操作时间</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">耗时(ms)</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">操作</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">操作人员</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">操作类型</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">描述</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">请求地址</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">状态</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">操作时间</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">耗时(ms)</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">

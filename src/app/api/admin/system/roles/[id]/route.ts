@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { OperType } from "@/generated/prisma/client";
+import { DataScopeType, OperType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
@@ -66,6 +66,7 @@ export async function PUT(
           name: body.name,
           code: body.code,
           orderNum: body.orderNum,
+          dataScope: body.dataScope ?? DataScopeType.DEPT_AND_CHILD,
           status: body.status,
           remark: normalizeOptional(body.remark),
         },

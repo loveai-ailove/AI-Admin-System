@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma, LoginStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
@@ -16,9 +17,9 @@ export async function GET(request: Request) {
     const startTime = searchParams.get("startTime");
     const endTime = searchParams.get("endTime");
 
-    const where: any = {};
+    const where: Prisma.SysLoginLogWhereInput = {};
     if (username) where.username = { contains: username };
-    if (status) where.status = status;
+    if (status) where.status = status as LoginStatus;
     if (ip) where.ip = { contains: ip };
     if (startTime || endTime) {
       where.loginTime = {};

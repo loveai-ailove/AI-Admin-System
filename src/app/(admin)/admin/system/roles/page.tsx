@@ -1,28 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { hasPermission, requirePermission } from "@/lib/auth/permission";
 import { RoleManager } from "@/components/system/RoleManager";
-
-function buildLevelMap(items: Array<{ id: number; parentId: number | null }>) {
-  const map = new Map<number, number>();
-
-  function getLevel(id: number): number {
-    if (map.has(id)) return map.get(id) || 0;
-    const current = items.find((item) => item.id === id);
-    if (!current || !current.parentId) {
-      map.set(id, 0);
-      return 0;
-    }
-    const level = getLevel(current.parentId) + 1;
-    map.set(id, level);
-    return level;
-  }
-
-  for (const item of items) {
-    getLevel(item.id);
-  }
-
-  return map;
-}
+import { buildLevelMap } from "@/lib/system/tree";
 
 export default async function SystemRolesPage() {
   const user = await requirePermission("system:role:list");
@@ -44,6 +23,7 @@ export default async function SystemRolesPage() {
         name: item.name,
         code: item.code,
         orderNum: item.orderNum,
+        dataScope: item.dataScope,
         status: item.status,
         remark: item.remark,
         menuIds: item.menus.map((menu) => menu.menuId),

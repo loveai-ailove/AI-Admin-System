@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { DataScopeType } from "@/generated/prisma/client";
 import { Modal } from "@/components/ui/Modal";
 
 type RoleRecord = {
@@ -9,6 +10,7 @@ type RoleRecord = {
   name: string;
   code: string;
   orderNum: number;
+  dataScope: DataScopeType;
   status: "ACTIVE" | "DISABLED";
   remark: string | null;
   menuIds: number[];
@@ -29,6 +31,7 @@ type RoleFormState = {
   name: string;
   code: string;
   orderNum: number;
+  dataScope: DataScopeType;
   status: "ACTIVE" | "DISABLED";
   remark: string;
   menuIds: number[];
@@ -38,10 +41,22 @@ const emptyForm: RoleFormState = {
   name: "",
   code: "",
   orderNum: 0,
+  dataScope: "DEPT_AND_CHILD",
   status: "ACTIVE",
   remark: "",
   menuIds: [],
 };
+
+const DATA_SCOPE_OPTIONS: Array<{ value: DataScopeType; label: string }> = [
+  { value: "SELF", label: "仅本人" },
+  { value: "DEPT", label: "本部门" },
+  { value: "DEPT_AND_CHILD", label: "本部门及子部门" },
+  { value: "ALL", label: "全部" },
+];
+
+function getDataScopeLabel(dataScope: DataScopeType) {
+  return DATA_SCOPE_OPTIONS.find((item) => item.value === dataScope)?.label ?? dataScope;
+}
 
 function MenuCheckbox({
   checked,
@@ -232,6 +247,7 @@ export function RoleManager({
       name: role.name,
       code: role.code,
       orderNum: role.orderNum,
+      dataScope: role.dataScope,
       status: role.status,
       remark: role.remark ?? "",
       menuIds: role.menuIds,
@@ -277,6 +293,10 @@ export function RoleManager({
     return collectDescendantIds(menuId).some((id) => selected.has(id));
   }
 
+  function isBranchStillSelected(menuId: number, selected: Set<number>) {
+    return selected.has(menuId) || hasAnySelectedDescendant(menuId, selected);
+  }
+
   function getSelectionStateBase(menuId: number, selected: Set<number>) {
     const descendants = collectDescendantIds(menuId);
     const checkedDescendantCount = descendants.filter((id) => selected.has(id)).length;
@@ -298,31 +318,24 @@ export function RoleManager({
       const selected = new Set(current.menuIds);
       const descendants = collectDescendantIds(menuId);
       const ancestors = collectAncestorIds(menuId);
+      const hasChildren = descendants.length > 0;
 
       if (selected.has(menuId)) {
         selected.delete(menuId);
 
-        for (const descendantId of descendants) {
-          selected.delete(descendantId);
+        if (hasChildren) {
+          for (const descendantId of descendants) {
+            selected.delete(descendantId);
+          }
         }
 
         for (const ancestorId of ancestors) {
-          if (!selected.has(ancestorId)) {
-            continue;
-          }
-
-          const shouldKeep = hasAnySelectedDescendant(ancestorId, selected);
-
-          if (!shouldKeep) {
+          if (!isBranchStillSelected(ancestorId, selected)) {
             selected.delete(ancestorId);
           }
         }
       } else {
         selected.add(menuId);
-
-        for (const descendantId of descendants) {
-          selected.add(descendantId);
-        }
 
         for (const ancestorId of ancestors) {
           selected.add(ancestorId);
@@ -484,16 +497,17 @@ export function RoleManager({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">角色名称</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">角色编码</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">状态</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">排序</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">创建时间</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">操作</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">角色名称</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">角色编码</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">数据范围</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">状态</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">排序</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">创建时间</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">
@@ -501,6 +515,7 @@ export function RoleManager({
               <tr key={role.id}>
                 <td className="px-4 py-3 font-medium text-gray-900">{role.name}</td>
                 <td className="px-4 py-3">{role.code}</td>
+                <td className="px-4 py-3">{getDataScopeLabel(role.dataScope)}</td>
                 <td className="px-4 py-3">{role.status === "ACTIVE" ? "启用" : "禁用"}</td>
                 <td className="px-4 py-3">{role.orderNum}</td>
                 <td className="px-4 py-3 text-gray-500">{role.createdAt}</td>
@@ -565,6 +580,20 @@ export function RoleManager({
               />
             </label>
             <label className="block text-sm text-gray-700">
+              数据范围
+              <select
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
+                value={form.dataScope}
+                onChange={(event) => setForm({ ...form, dataScope: event.target.value as DataScopeType })}
+              >
+                {DATA_SCOPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm text-gray-700">
               状态
               <select
                 className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
@@ -591,7 +620,7 @@ export function RoleManager({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-medium text-gray-700">菜单权限</div>
-                <div className="mt-1 text-xs text-gray-500">支持父子联动勾选。</div>
+                <div className="mt-1 text-xs text-gray-500">勾选子节点会自动补齐祖先；勾选菜单节点不会强制勾选其下按钮。</div>
               </div>
               <div className="flex gap-2">
                 <button

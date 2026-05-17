@@ -1,12 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { hasPermission, requirePermission } from "@/lib/auth/permission";
 import { DeptManager } from "@/components/system/DeptManager";
-
-function getDeptLevel(ancestors: string) {
-  return ancestors
-    .split(",")
-    .filter((item) => item && item !== "0").length;
-}
+import { getLevelFromAncestors } from "@/lib/system/tree";
 
 export default async function SystemDeptsPage() {
   const user = await requirePermission("system:dept:list");
@@ -22,7 +17,7 @@ export default async function SystemDeptsPage() {
         parentId: item.parentId,
         parentName: item.parentId ? deptMap.get(item.parentId) || null : null,
         name: item.name,
-        level: getDeptLevel(item.ancestors),
+        level: getLevelFromAncestors(item.ancestors),
         orderNum: item.orderNum,
         leader: item.leader,
         phone: item.phone,

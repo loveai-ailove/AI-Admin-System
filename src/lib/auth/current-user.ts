@@ -1,11 +1,13 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
-import { Status } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { DataScopeType, Status } from "@/generated/prisma/client";
+import { createScopedPrisma, prisma } from "@/lib/prisma";
 import { getSessionToken } from "@/lib/auth/session";
+import { resolveUserDataScope } from "@/lib/data-scope";
+import { setRequestPrisma } from "@/lib/scope-context";
 import type { CurrentUser } from "@/types/auth";
 
-export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
+async function resolveCurrentUser(): Promise<CurrentUser | null> {
   const token = await getSessionToken();
 
   if (!token) {
@@ -80,17 +82,31 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     }
   }
 
-  return {
+  const dataScope = await resolveUserDataScope({
+    userId: session.user.id,
+    deptId: session.user.deptId,
+    isAdmin: session.user.isAdmin,
+    roleDataScopes: activeRoles.map((role) => role.dataScope ?? DataScopeType.DEPT_AND_CHILD),
+  });
+
+  const user: CurrentUser = {
     id: session.user.id,
     username: session.user.username,
     nickname: session.user.nickname,
     isAdmin: session.user.isAdmin,
+    deptId: session.user.deptId,
     deptName: session.user.dept?.name ?? null,
+    dataScopeType: dataScope.dataScopeType,
     roleCodes: activeRoles.map((role) => role.code),
     permissions: Array.from(permissions),
     menus: Array.from(menuMap.values()),
+    allowedDeptIds: dataScope.allowedDeptIds,
   };
-});
+
+  return user;
+}
+
+export const getCurrentUser = cache(resolveCurrentUser);
 
 export async function requireLogin() {
   const user = await getCurrentUser();
@@ -98,6 +114,15 @@ export async function requireLogin() {
   if (!user) {
     redirect("/login");
   }
+
+  setRequestPrisma(
+    createScopedPrisma({
+      userId: user.id,
+      deptId: user.deptId,
+      dataScopeType: user.dataScopeType,
+      allowedDeptIds: user.allowedDeptIds,
+    }),
+  );
 
   return user;
 }

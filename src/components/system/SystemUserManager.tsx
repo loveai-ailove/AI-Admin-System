@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { TreeSelect } from "@/components/ui/TreeSelect";
+import { buildTree } from "@/lib/system/tree";
 
 type UserRecord = {
   id: number;
@@ -96,23 +97,7 @@ export function SystemUserManager({
   }, [editingId, form.deptId, form.roleIds, form.password]);
 
   const deptTree = useMemo(() => {
-    const nodeMap = new Map<number, DeptTreeNode>();
-    const roots: DeptTreeNode[] = [];
-
-    for (const dept of depts) {
-      nodeMap.set(dept.id, { id: dept.id, name: dept.name, children: [] });
-    }
-
-    for (const dept of depts) {
-      const node = nodeMap.get(dept.id)!;
-      if (dept.parentId && nodeMap.has(dept.parentId)) {
-        nodeMap.get(dept.parentId)!.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    }
-
-    return roots;
+    return buildTree(depts.map(({ id, parentId, name }) => ({ id, parentId, name }))) as unknown as DeptTreeNode[];
   }, [depts]);
 
   function collectDeptIds(node: DeptTreeNode): number[] {
@@ -139,7 +124,7 @@ export function SystemUserManager({
         page: currentPage.toString(),
         pageSize: PAGE_SIZE.toString(),
       });
-      if (listKeyword) params.set("username", listKeyword);
+      if (listKeyword) params.set("keyword", listKeyword);
       if (listStatusFilter !== "ALL") params.set("status", listStatusFilter);
       if (listDeptFilter) {
         const deptId = Number(listDeptFilter);
@@ -390,17 +375,17 @@ export function SystemUserManager({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">用户名</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">昵称</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">部门</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">角色</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">状态</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">创建时间</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">操作</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">用户名</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">昵称</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">部门</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">角色</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">状态</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">创建时间</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">

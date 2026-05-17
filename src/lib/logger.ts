@@ -175,3 +175,47 @@ export async function updateLogoutTimeBySessionTokens(sessionTokens: string[]) {
     console.error("更新登出时间失败:", error);
   }
 }
+
+const LOG_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+
+export async function cleanupOldLogs() {
+  const cutoff = new Date(Date.now() - LOG_RETENTION_MS);
+
+  let operCount = 0;
+  try {
+    const operResult = await prisma.sysOperLog.deleteMany({
+      where: { operTime: { lt: cutoff } },
+    });
+    operCount = operResult.count;
+  } catch (error) {
+    console.error("清理操作日志失败:", error);
+  }
+
+  let loginCount = 0;
+  try {
+    const loginResult = await prisma.sysLoginLog.deleteMany({
+      where: { loginTime: { lt: cutoff } },
+    });
+    loginCount = loginResult.count;
+  } catch (error) {
+    console.error("清理登录日志失败:", error);
+  }
+
+  if (operCount > 0 || loginCount > 0) {
+    console.log(`清理日志完成: 操作日志 ${operCount} 条, 登录日志 ${loginCount} 条 (保留近6个月)`);
+  }
+}
+
+const logCleanupInterval = setInterval(
+  () => {
+    cleanupOldLogs().catch((error) => {
+      console.error("定时清理日志失败:", error);
+    });
+  },
+  24 * 60 * 60 * 1000
+);
+
+if (typeof process !== "undefined") {
+  process.on("SIGTERM", () => clearInterval(logCleanupInterval));
+  process.on("SIGINT", () => clearInterval(logCleanupInterval));
+}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { OperType } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { createScopedPrisma, rawPrisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { hashPassword } from "@/lib/auth/password";
 import { requireApiPermission } from "@/lib/auth/api-auth";
@@ -16,14 +16,17 @@ function parseId(id: string) {
   return value;
 }
 
-async function ensureUserExists(id: number) {
-  const user = await prisma.sysUser.findUnique({ where: { id } });
+async function ensureUserExists(
+  prismaClient: ReturnType<typeof createScopedPrisma>,
+  id: number,
+) {
+  const user = await prismaClient.sysUser.findFirst({ where: { id } });
   if (!user) throw new Error("NOT_FOUND");
   return user;
 }
 
 async function ensureUniqueFields(id: number, username: string, email: string | null, mobile: string | null) {
-  const existing = await prisma.sysUser.findFirst({
+  const existing = await rawPrisma.sysUser.findFirst({
     where: {
       OR: [{ username }, ...(email ? [{ email }] : []), ...(mobile ? [{ mobile }] : [])],
       NOT: { id },
@@ -41,9 +44,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireApiPermission("system:user:list");
+    const currentUser = await requireApiPermission("system:user:list");
+    const scopedPrisma = createScopedPrisma({
+      userId: currentUser.id,
+      deptId: currentUser.deptId,
+      dataScopeType: currentUser.dataScopeType,
+      allowedDeptIds: currentUser.allowedDeptIds,
+    });
     const { id } = await params;
-    const user = await prisma.sysUser.findUnique({
+    const user = await scopedPrisma.sysUser.findFirst({
       where: { id: parseId(id) },
       include: {
         dept: true,
@@ -81,10 +90,16 @@ export async function PUT(
 ) {
   try {
     const currentUser = await requireApiPermission("system:user:update");
+    const scopedPrisma = createScopedPrisma({
+      userId: currentUser.id,
+      deptId: currentUser.deptId,
+      dataScopeType: currentUser.dataScopeType,
+      allowedDeptIds: currentUser.allowedDeptIds,
+    });
     const { id } = await params;
     const userId = parseId(id);
     const body = systemUserSchema.parse(await request.json());
-    const existingUser = await ensureUserExists(userId);
+    const existingUser = await ensureUserExists(scopedPrisma, userId);
     const email = normalizeOptional(body.email);
     const mobile = normalizeOptional(body.mobile);
     const remark = normalizeOptional(body.remark);
@@ -103,7 +118,7 @@ export async function PUT(
       throw new Error("不能禁用当前登录用户");
     }
 
-    await prisma.$transaction(async (tx) => {
+    await rawPrisma.$transaction(async (tx) => {
       await tx.sysUser.update({
         where: { id: userId },
         data: {
@@ -147,6 +162,12 @@ export async function DELETE(
 ) {
   try {
     const currentUser = await requireApiPermission("system:user:delete");
+    const scopedPrisma = createScopedPrisma({
+      userId: currentUser.id,
+      deptId: currentUser.deptId,
+      dataScopeType: currentUser.dataScopeType,
+      allowedDeptIds: currentUser.allowedDeptIds,
+    });
     const { id } = await params;
     const userId = parseId(id);
 
@@ -154,8 +175,8 @@ export async function DELETE(
       throw new Error("不能删除当前登录用户");
     }
 
-    const user = await ensureUserExists(userId);
-    await prisma.sysUser.delete({ where: { id: userId } });
+    const user = await ensureUserExists(scopedPrisma, userId);
+    await rawPrisma.sysUser.delete({ where: { id: userId } });
 
     await logOperation({
       request,
