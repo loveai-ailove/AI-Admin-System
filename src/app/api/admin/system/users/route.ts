@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { Prisma, OperType } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { Prisma, OperType, Status } from "@/generated/prisma/client";
+import { createScopedPrisma, rawPrisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { hashPassword } from "@/lib/auth/password";
 import { requireApiPermission } from "@/lib/auth/api-auth";
@@ -24,7 +24,7 @@ async function ensureUniqueUserFields(params: {
     conditions.push({ mobile: params.mobile });
   }
 
-  const existing = await prisma.sysUser.findFirst({
+  const existing = await rawPrisma.sysUser.findFirst({
     where: {
       OR: conditions,
       NOT: params.excludeId ? { id: params.excludeId } : undefined,
@@ -39,26 +39,39 @@ async function ensureUniqueUserFields(params: {
 
 export async function GET(request: Request) {
   try {
-    await requireApiPermission("system:user:list");
+    const currentUser = await requireApiPermission("system:user:list");
+    const scopedPrisma = createScopedPrisma({
+      userId: currentUser.id,
+      deptId: currentUser.deptId,
+      dataScopeType: currentUser.dataScopeType,
+      allowedDeptIds: currentUser.allowedDeptIds,
+    });
 
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1");
     const pageSize = parseInt(searchParams.get("pageSize") || "10");
-    const username = searchParams.get("username");
+    const keyword = searchParams.get("keyword");
     const status = searchParams.get("status");
     const deptIdParam = searchParams.get("deptId");
 
-    const where: any = {};
-    if (username) where.username = { contains: username };
-    if (status) where.status = status;
+    const where: Prisma.SysUserWhereInput = {};
+    if (keyword) {
+      where.OR = [
+        { username: { contains: keyword } },
+        { nickname: { contains: keyword } },
+        { email: { contains: keyword } },
+        { mobile: { contains: keyword } },
+      ];
+    }
+    if (status) where.status = status as Status;
     if (deptIdParam) {
       const deptIds = deptIdParam.split(",").map(Number).filter((id) => !Number.isNaN(id));
       where.deptId = { in: deptIds };
     }
 
     const [total, users] = await Promise.all([
-      prisma.sysUser.count({ where }),
-      prisma.sysUser.findMany({
+      scopedPrisma.sysUser.count({ where }),
+      scopedPrisma.sysUser.findMany({
         where,
         include: {
           dept: true,
@@ -109,7 +122,7 @@ export async function POST(request: Request) {
 
     const passwordHash = await hashPassword(body.password);
 
-    const user = await prisma.$transaction(async (tx) => {
+    const user = await rawPrisma.$transaction(async (tx) => {
       const created = await tx.sysUser.create({
         data: {
           username: body.username,

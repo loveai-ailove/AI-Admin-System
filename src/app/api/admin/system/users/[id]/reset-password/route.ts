@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createScopedPrisma, rawPrisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { hashPassword } from "@/lib/auth/password";
 import { requireApiPermission } from "@/lib/auth/api-auth";
@@ -21,12 +21,18 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireApiPermission("system:user:update");
+    const currentUser = await requireApiPermission("system:user:update");
+    const scopedPrisma = createScopedPrisma({
+      userId: currentUser.id,
+      deptId: currentUser.deptId,
+      dataScopeType: currentUser.dataScopeType,
+      allowedDeptIds: currentUser.allowedDeptIds,
+    });
     const { id } = await params;
     const userId = parseId(id);
     const body = resetPasswordSchema.parse(await request.json());
 
-    const user = await prisma.sysUser.findUnique({ where: { id: userId } });
+    const user = await scopedPrisma.sysUser.findFirst({ where: { id: userId } });
     if (!user) {
       throw new Error("NOT_FOUND");
     }
@@ -34,7 +40,7 @@ export async function POST(
     const sessionTokens = await listUserSessionTokens(userId);
     const passwordHash = await hashPassword(body.newPassword);
 
-    await prisma.$transaction(async (tx) => {
+    await rawPrisma.$transaction(async (tx) => {
       await tx.sysUser.update({
         where: { id: userId },
         data: {

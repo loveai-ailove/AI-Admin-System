@@ -18,6 +18,13 @@ enum MenuType {
   BUTTON
 }
 
+enum DataScopeType {
+  SELF
+  DEPT
+  DEPT_AND_CHILD
+  ALL
+}
+
 model SysDept {
   id        Int       @id @default(autoincrement())
   parentId  Int?      @map("parent_id")
@@ -44,6 +51,7 @@ model SysRole {
   name      String
   code      String        @unique
   orderNum  Int           @default(0) @map("order_num")
+  dataScope DataScopeType @default(DEPT_AND_CHILD) @map("data_scope")
   status    Status        @default(ACTIVE)
   remark    String?       @db.Text
   createdAt DateTime      @default(now()) @map("created_at")

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { OperType } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, rawPrisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { normalizeOptional } from "@/lib/validators/common";
@@ -44,10 +44,10 @@ export async function PUT(
     const existing = await prisma.sysDept.findUnique({ where: { id: deptId } });
     if (!existing) throw new Error("NOT_FOUND");
 
-    await assertDeptMoveAllowed(prisma, deptId, body.parentId ?? null);
-    const newAncestors = await resolveDeptAncestors(prisma, body.parentId ?? null);
+    await assertDeptMoveAllowed(rawPrisma, deptId, body.parentId ?? null);
+    const newAncestors = await resolveDeptAncestors(rawPrisma, body.parentId ?? null);
 
-    await prisma.$transaction(async (tx) => {
+    await rawPrisma.$transaction(async (tx) => {
       await tx.sysDept.update({
         where: { id: deptId },
         data: {

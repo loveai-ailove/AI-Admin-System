@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { TreeSelect } from "@/components/ui/TreeSelect";
+import { buildTree, collectParentNodeIds } from "@/lib/system/tree";
 
 type DeptRecord = {
   id: number;
@@ -16,10 +17,6 @@ type DeptRecord = {
   phone: string | null;
   email: string | null;
   status: "ACTIVE" | "DISABLED";
-};
-
-type DeptTreeNode = DeptRecord & {
-  children: DeptTreeNode[];
 };
 
 type DeptFormState = {
@@ -59,47 +56,19 @@ export function DeptManager({
   const [error, setError] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
 
-  const deptTree = useMemo(() => {
-    const nodeMap = new Map<number, DeptTreeNode>();
-    const roots: DeptTreeNode[] = [];
-
-    for (const dept of depts) {
-      nodeMap.set(dept.id, { ...dept, children: [] });
-    }
-
-    for (const dept of depts) {
-      const node = nodeMap.get(dept.id)!;
-      if (dept.parentId && nodeMap.has(dept.parentId)) {
-        nodeMap.get(dept.parentId)!.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    }
-
-    return roots;
-  }, [depts]);
+  const deptTree = useMemo(() => buildTree(depts), [depts]);
 
   useMemo(() => {
-    const allParentIds = new Set<number>();
-    const collectParentIds = (nodes: DeptTreeNode[]) => {
-      for (const node of nodes) {
-        if (node.children.length > 0) {
-          allParentIds.add(node.id);
-          collectParentIds(node.children);
-        }
-      }
-    };
-    collectParentIds(deptTree);
-    setExpandedIds(allParentIds);
+    setExpandedIds(collectParentNodeIds(deptTree));
   }, [deptTree]);
 
   const flattenTree = useMemo(() => {
     const result: DeptRecord[] = [];
-    const walk = (nodes: DeptTreeNode[], level: number) => {
+    const walk = (nodes: typeof deptTree, depth: number) => {
       for (const node of nodes) {
-        result.push({ ...node, level, children: undefined } as DeptRecord);
+        result.push({ ...node, level: depth, children: undefined } as unknown as DeptRecord);
         if (expandedIds.has(node.id) && node.children.length > 0) {
-          walk(node.children, level + 1);
+          walk(node.children, depth + 1);
         }
       }
     };
@@ -120,17 +89,7 @@ export function DeptManager({
   }
 
   function expandAll() {
-    const allParentIds = new Set<number>();
-    const collectParentIds = (nodes: DeptTreeNode[]) => {
-      for (const node of nodes) {
-        if (node.children.length > 0) {
-          allParentIds.add(node.id);
-          collectParentIds(node.children);
-        }
-      }
-    };
-    collectParentIds(deptTree);
-    setExpandedIds(allParentIds);
+    setExpandedIds(collectParentNodeIds(deptTree));
   }
 
   function collapseAll() {
@@ -260,16 +219,16 @@ export function DeptManager({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">部门名称</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">负责人</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">联系电话</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">状态</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">排序</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">操作</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">部门名称</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">负责人</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">联系电话</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">状态</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">排序</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">

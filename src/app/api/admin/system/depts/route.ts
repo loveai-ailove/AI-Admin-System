@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { OperType } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, rawPrisma } from "@/lib/prisma";
 import { handleApiError } from "@/lib/api";
 import { requireApiPermission } from "@/lib/auth/api-auth";
 import { normalizeOptional } from "@/lib/validators/common";
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   try {
     await requireApiPermission("system:dept:create");
     const body = systemDeptSchema.parse(await request.json());
-    const ancestors = await resolveDeptAncestors(prisma, body.parentId ?? null);
+    const ancestors = await resolveDeptAncestors(rawPrisma, body.parentId ?? null);
 
     const dept = await prisma.sysDept.create({
       data: {

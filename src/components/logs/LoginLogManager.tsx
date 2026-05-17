@@ -159,17 +159,17 @@ export function LoginLogManager() {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">用户名</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">IP 地址</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">浏览器</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">状态</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">登录时间</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">登出时间</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">信息</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">用户名</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">IP 地址</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">浏览器</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">状态</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">登录时间</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">登出时间</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">信息</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">

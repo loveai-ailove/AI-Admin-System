@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { TreeSelect } from "@/components/ui/TreeSelect";
+import { buildTree, collectParentNodeIds } from "@/lib/system/tree";
 
 type MenuRecord = {
   id: number;
@@ -19,10 +20,6 @@ type MenuRecord = {
   visible: boolean;
   status: "ACTIVE" | "DISABLED";
   level: number;
-};
-
-type MenuTreeNode = MenuRecord & {
-  children: MenuTreeNode[];
 };
 
 type MenuFormState = {
@@ -68,47 +65,19 @@ export function MenuManager({
   const [error, setError] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
 
-  const menuTree = useMemo(() => {
-    const nodeMap = new Map<number, MenuTreeNode>();
-    const roots: MenuTreeNode[] = [];
-
-    for (const menu of menus) {
-      nodeMap.set(menu.id, { ...menu, children: [] });
-    }
-
-    for (const menu of menus) {
-      const node = nodeMap.get(menu.id)!;
-      if (menu.parentId && nodeMap.has(menu.parentId)) {
-        nodeMap.get(menu.parentId)!.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    }
-
-    return roots;
-  }, [menus]);
+  const menuTree = useMemo(() => buildTree(menus), [menus]);
 
   useMemo(() => {
-    const allParentIds = new Set<number>();
-    const collectParentIds = (nodes: MenuTreeNode[]) => {
-      for (const node of nodes) {
-        if (node.children.length > 0) {
-          allParentIds.add(node.id);
-          collectParentIds(node.children);
-        }
-      }
-    };
-    collectParentIds(menuTree);
-    setExpandedIds(allParentIds);
+    setExpandedIds(collectParentNodeIds(menuTree));
   }, [menuTree]);
 
   const flattenTree = useMemo(() => {
     const result: MenuRecord[] = [];
-    const walk = (nodes: MenuTreeNode[], level: number) => {
+    const walk = (nodes: typeof menuTree, depth: number) => {
       for (const node of nodes) {
-        result.push({ ...node, level, children: undefined } as MenuRecord);
+        result.push({ ...node, level: depth, children: undefined } as unknown as MenuRecord);
         if (expandedIds.has(node.id) && node.children.length > 0) {
-          walk(node.children, level + 1);
+          walk(node.children, depth + 1);
         }
       }
     };
@@ -129,17 +98,7 @@ export function MenuManager({
   }
 
   function expandAll() {
-    const allParentIds = new Set<number>();
-    const collectParentIds = (nodes: MenuTreeNode[]) => {
-      for (const node of nodes) {
-        if (node.children.length > 0) {
-          allParentIds.add(node.id);
-          collectParentIds(node.children);
-        }
-      }
-    };
-    collectParentIds(menuTree);
-    setExpandedIds(allParentIds);
+    setExpandedIds(collectParentNodeIds(menuTree));
   }
 
   function collapseAll() {
@@ -275,16 +234,16 @@ export function MenuManager({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-gray-100">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">菜单名称</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">类型</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">路由</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">权限标识</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">状态</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-500">操作</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">菜单名称</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">类型</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">路由</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">权限标识</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">状态</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-500 whitespace-nowrap">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">

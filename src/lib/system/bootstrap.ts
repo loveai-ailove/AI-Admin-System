@@ -1,4 +1,4 @@
-import { MenuType, Status, type PrismaClient } from "@/generated/prisma/client";
+import { DataScopeType, MenuType, Status, type PrismaClient } from "@/generated/prisma/client";
 import { hashPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
 
@@ -185,6 +185,7 @@ export async function bootstrapSystem() {
         name: "超级管理员",
         code: "admin",
         orderNum: 0,
+        dataScope: DataScopeType.ALL,
         status: Status.ACTIVE,
         remark: "拥有系统全部权限",
       },

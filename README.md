@@ -1,24 +1,27 @@
-# AI Coding
+# AI Admin System
 
-基于 **Next.js 16 + React 19 + Prisma 7 + MySQL 8.4** 构建的后台管理系统示例。当前最新版本已同步高风险修复后的实现，具备完整的认证鉴权、RBAC 权限控制、系统管理、日志审计与基础安全增强能力，可作为中后台管理平台的起点项目。
+`AI Admin System` 是一个可直接作为企业后台起点的管理系统模板，基于 **Next.js 16 + React 19 + Prisma 7 + MySQL 8.4** 构建。当前版本已覆盖认证鉴权、RBAC、系统管理、日志审计与基础安全能力，适合作为二次开发项目，也适合作为团队内部中后台规范示例。
 
-## 项目概览
+## 项目介绍
 
-当前版本已经不是简单的用户 CRUD，而是一个包含初始化、登录保护、权限路由、日志追踪和基础审计能力的管理后台骨架。
+这个项目的目标不是演示单一功能，而是提供一套可以持续演进的后台骨架，帮助新参与者快速理解系统边界、核心模块与开发方式，并在此基础上继续扩展业务能力。
 
-核心能力包括：
+如果你是第一次参与本项目，建议按以下顺序阅读并开始开发：
 
-- 用户名密码登录与退出登录
-- 登录页滑块验证码校验
+- 先看“功能模块”，了解系统已经具备的能力边界
+- 再看“项目结构”和“本地开发”，快速完成本地启动
+- 然后看“API 接口”和“数据模型”，理解前后端与数据库边界
+- 最后结合“运维说明”和“后续可扩展方向”，确定后续迭代切入点
+
+当前版本核心能力包括：
+
+- 用户名密码登录、退出登录与滑块验证码校验
 - 基于 `admin_session` Cookie 的服务端 Session 管理
 - 首次启动一键初始化默认部门、角色、菜单、权限与管理员账号
-- 页面权限与按钮权限双层 RBAC 控制
-- 动态侧边栏菜单与后台路由守卫
-- 工作台统计面板
-- 用户、角色、菜单、部门管理
-- 个人资料维护与修改当前登录用户密码
-- 登录日志与操作日志查询
-- 日志敏感字段脱敏
+- 页面权限、接口权限、按钮权限一体化 RBAC 控制
+- 动态侧边栏菜单、后台路由守卫与工作台统计
+- 用户、角色、菜单、部门、个人中心等基础管理能力
+- 登录日志、操作日志与敏感字段脱敏
 
 ## 安全增强
 
@@ -217,6 +220,8 @@ Prisma Schema 当前包含以下核心实体：
 
 ## 项目结构
 
+下面的目录是日常开发最常接触的区域。新增功能时，通常会同时涉及页面、组件、接口、校验器和权限逻辑，建议先从这里建立整体认知：
+
 ```text
 src/
 ├── app/
@@ -401,7 +406,7 @@ docker run -d \
 
 ```bash
 cd /opt/ai-coding/app
-git clone <your-repository-url> .
+git clone https://github.com/loveai-ailove/AI-Admin-System.git .
 cp .env.example .env
 # 编辑 .env 为生产配置
 
@@ -560,15 +565,13 @@ sudo systemctl restart ai-coding
 
 ## 本地开发
 
-如果你的目标是本地联调，而不是正式上线，可使用以下流程：
+如果你的目标是参与日常开发，推荐先完成下面这套最小启动流程：
 
 ```bash
-git clone <your-repository-url>
-cd ai-coding
-
+git clone https://github.com/loveai-ailove/AI-Admin-System.git
+cd AI-Admin-System
 cp .env.example .env
 # 按实际环境修改数据库连接信息
-
 npm install
 npm run db:generate
 npm run db:migrate
@@ -577,18 +580,34 @@ npm run dev
 
 启动后访问 [http://localhost:3000](http://localhost:3000)。
 
-## 可用命令
+### 开发流程建议
+
+- 第一次进入项目时，优先确认 `.env`、数据库连接和 Prisma Client 生成是否正常
+- 启动后先访问 `/login`，在空库场景下执行“初始化系统默认数据”
+- 开发页面时，优先检查对应的页面路由、接口路由、校验器与权限点是否齐全
+- 新增系统管理能力时，通常需要同时修改菜单权限、接口权限、页面组件和数据模型
+- 提交前至少执行 `npm run lint`，涉及数据结构变更时补充执行 `npm run db:migrate`
+
+## 常用开发命令
 
 ```bash
 npm run dev          # 启动开发服务器
-npm run build        # 生产构建
-npm start            # 启动生产服务器
-npm run lint         # 代码检查
+npm run build        # 执行生产构建，适合验证发布前状态
+npm start            # 以生产模式启动应用
+npm run lint         # 执行代码检查
 npm run db:migrate   # 执行 Prisma 迁移
 npm run db:generate  # 生成 Prisma Client
 npm run db:push      # 将 Schema 推送到数据库
 npm run db:studio    # 打开 Prisma Studio
 ```
+
+## 开发协作建议
+
+- 页面代码优先放在 `src/app` 与 `src/components`，避免把业务逻辑堆到页面文件
+- 服务端认证、权限判断、日志记录等公共逻辑优先复用 `src/lib`
+- 新增接口时同时补齐参数校验、权限校验和必要的日志记录
+- 调整菜单、角色、按钮权限时，务必同步检查初始化数据与 RBAC 关联逻辑
+- 涉及密码、Token、会话、日志字段时，默认按敏感信息处理，避免明文输出
 
 ## 运维说明
 

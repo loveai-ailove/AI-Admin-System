@@ -1,12 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { hasPermission, requirePermission } from "@/lib/auth/permission";
 import { SystemUserManager } from "@/components/system/SystemUserManager";
-
-function getDeptLevel(ancestors: string) {
-  return ancestors
-    .split(",")
-    .filter((item) => item && item !== "0").length;
-}
+import { getLevelFromAncestors } from "@/lib/system/tree";
 
 export default async function SystemUsersPage() {
   const user = await requirePermission("system:user:list");
@@ -18,7 +13,7 @@ export default async function SystemUsersPage() {
 
   return (
     <SystemUserManager
-      depts={depts.map((item) => ({ id: item.id, parentId: item.parentId, name: item.name, level: getDeptLevel(item.ancestors) }))}
+      depts={depts.map((item) => ({ id: item.id, parentId: item.parentId, name: item.name, level: getLevelFromAncestors(item.ancestors) }))}
       roles={roles.map((item) => ({ id: item.id, name: item.name, code: item.code }))}
       permissions={{
         create: hasPermission(user, "system:user:create"),
