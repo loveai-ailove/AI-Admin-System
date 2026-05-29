@@ -1,0 +1,997 @@
+import { chatCompletion, type ChatMessage } from "@/lib/ai/llm";
+import { getSingleEmbedding } from "@/lib/ai/embedding";
+import { searchVectors } from "@/lib/infra/milvus";
+import { getDatasetDataModel } from "@/lib/models/dataset";
+import { connectMongo } from "@/lib/infra/mongo";
+import {
+  FlowNodeTypeEnum,
+  NodeInputKeyEnum,
+  NodeOutputKeyEnum,
+  DispatchNodeResponseKeyEnum,
+  SseResponseEventEnum,
+  type WorkflowNodeItemType,
+  type WorkflowEdgeItemType,
+  type IfElseConditionType,
+} from "./constants";
+import {
+  type RuntimeNodeItemType,
+  type RuntimeEdgeItemType,
+  type NodeDispatchResult,
+  type NodeResponseItemType,
+  type DispatchContext,
+} from "./types";
+import {
+  resolveVariableReference,
+  getVariableValue,
+  valueTypeFormat,
+} from "./variables";
+
+interface ModuleDispatchProps {
+  ctx: DispatchContext;
+  node: RuntimeNodeItemType;
+  nodeOutput: (node: RuntimeNodeItemType, result: Record<string, any>) => void;
+  streamResponse?: (event: string, data: string | Record<string, any>) => void;
+}
+
+type HandlerFn = (props: ModuleDispatchProps) => Promise<NodeDispatchResult>;
+
+function getFallbackOutputKey(node: RuntimeNodeItemType) {
+  return node.outputs?.[0]?.key || NodeOutputKeyEnum.answerText;
+}
+
+function getLegacyInputKey(node: RuntimeNodeItemType) {
+  const connectedInputs = node.inputs.filter((input) => input.showTargetInApp);
+  if (connectedInputs.length === 1) {
+    return connectedInputs[0].key;
+  }
+  return undefined;
+}
+
+function getConnectedInputValue(
+  ctx: DispatchContext,
+  node: RuntimeNodeItemType,
+  inputKey: string,
+  nodesMap?: Map<string, RuntimeNodeItemType>
+) {
+  const legacyInputKey = getLegacyInputKey(node);
+  const edges = ctx.runtimeEdges.filter(
+    (edge) =>
+      edge.target === node.nodeId &&
+      (edge.targetHandle === inputKey || (!edge.targetHandle && legacyInputKey === inputKey))
+  );
+
+  if (edges.length === 0) return undefined;
+
+  const values = edges
+    .map((edge) => {
+      const sourceNode = nodesMap?.get(edge.source);
+      const sourceKey = edge.sourceHandle || (sourceNode ? getFallbackOutputKey(sourceNode) : undefined);
+      if (!sourceKey) return undefined;
+      return resolveVariableReference([edge.source, sourceKey], ctx.variables, nodesMap, ctx.nodeOutputMap);
+    })
+    .filter((item) => item !== undefined);
+
+  if (values.length === 0) return undefined;
+  return values.length === 1 ? values[0] : values;
+}
+
+export function getNodeRunParams(
+  ctx: DispatchContext,
+  node: RuntimeNodeItemType,
+  variables: Record<string, any>,
+  nodesMap?: Map<string, RuntimeNodeItemType>
+): Record<string, any> {
+  const params: Record<string, any> = {};
+
+  for (const input of node.inputs) {
+    const connectedValue = getConnectedInputValue(ctx, node, input.key, nodesMap);
+    if (connectedValue !== undefined) {
+      params[input.key] = connectedValue;
+      continue;
+    }
+
+    const rawValue = input.value ?? input.defaultValue ?? "";
+    params[input.key] = resolveVariableReference(rawValue, variables, nodesMap, ctx.nodeOutputMap);
+  }
+
+  return params;
+}
+
+function getHistories(historyCount: any, ctx: DispatchContext): Array<{ obj: "Human" | "AI"; value: string }> {
+  const count = typeof historyCount === "number" ? historyCount : 6;
+  return ctx.histories.slice(-Math.min(count, ctx.histories.length));
+}
+
+// ═══════════════════════════════════════════════
+// System / No-op nodes
+// ═══════════════════════════════════════════════
+
+async function dispatchWorkflowStart(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx } = props;
+  const userChatInput = ctx.userChatInput || ctx.query || "";
+  return {
+    data: {
+      [NodeOutputKeyEnum.answerText]: userChatInput,
+    },
+    nodeResponse: {
+      nodeId: props.node.nodeId,
+      moduleName: props.node.name,
+      moduleType: props.node.flowNodeType,
+    },
+  };
+}
+
+async function dispatchSystemConfig(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  return {
+    data: { ...props.ctx.variables },
+    nodeResponse: {
+      nodeId: props.node.nodeId,
+      moduleName: props.node.name,
+      moduleType: props.node.flowNodeType,
+    },
+  };
+}
+
+function dispatchNoop(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  return Promise.resolve({
+    data: {},
+    nodeResponse: {
+      nodeId: props.node.nodeId,
+      moduleName: props.node.name,
+      moduleType: props.node.flowNodeType,
+    },
+  });
+}
+
+// ═══════════════════════════════════════════════
+// Chat Node (LLM)
+// ═══════════════════════════════════════════════
+
+async function dispatchChatNode(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const model = params[NodeInputKeyEnum.aiModel] || process.env.DEFAULT_LLM_MODEL || "gpt-3.5-turbo";
+  const systemPrompt = params[NodeInputKeyEnum.aiSystemPrompt] || "";
+  const temperature = params[NodeInputKeyEnum.aiTemperature] ?? 0.7;
+  const maxToken = params[NodeInputKeyEnum.aiMaxToken] ?? 2000;
+  const userChatInput = params[NodeInputKeyEnum.userChatInput] || ctx.userChatInput || "";
+  const history = params[NodeInputKeyEnum.history];
+  const isResponseAnswerText = params[NodeInputKeyEnum.isResponseAnswerText] !== false;
+  let quoteQA = params[NodeOutputKeyEnum.datasetQuoteQA] ?? ctx.variables[NodeOutputKeyEnum.datasetQuoteQA];
+  if (typeof quoteQA === "string") {
+    try {
+      const parsed = JSON.parse(quoteQA);
+      if (Array.isArray(parsed)) {
+        quoteQA = parsed;
+      }
+    } catch {}
+  }
+
+  const messages: ChatMessage[] = [];
+
+  if (systemPrompt) {
+    messages.push({ role: "system", content: systemPrompt });
+  }
+
+  const chatHistories = getHistories(history, ctx);
+  for (const h of chatHistories) {
+    messages.push({
+      role: h.obj === "Human" ? "user" as const : "assistant" as const,
+      content: h.value,
+    });
+  }
+
+  if (quoteQA && Array.isArray(quoteQA) && quoteQA.length > 0) {
+    const quoteText = quoteQA
+      .map((q: any, i: number) => `[${i + 1}] ${q.q}${q.a ? ` - ${q.a}` : ""}`)
+      .join("\n");
+    messages.push({
+      role: "user",
+      content: `根据以下知识库内容回答问题:\n${quoteText}\n\n用户问题: ${userChatInput}`,
+    });
+  } else {
+    messages.push({ role: "user", content: userChatInput });
+  }
+
+  const result = await chatCompletion({
+    model,
+    messages,
+    temperature,
+    max_tokens: maxToken,
+  });
+
+  const content = result.choices[0]?.message?.content || "";
+
+  return {
+    data: {
+      [NodeOutputKeyEnum.answerText]: isResponseAnswerText ? content : "",
+    },
+    answerText: isResponseAnswerText ? content : "",
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+      model,
+      tokens: result.usage?.total_tokens || 0,
+      query: userChatInput,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Dataset Search Node
+// ═══════════════════════════════════════════════
+
+async function dispatchDatasetSearch(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const datasets = params[NodeInputKeyEnum.datasetSelectList] || [];
+  const similarity = params[NodeInputKeyEnum.datasetSimilarity] ?? 0.4;
+  const limit = params[NodeInputKeyEnum.datasetMaxTokens] ?? 5000;
+  const userQuery = params[NodeInputKeyEnum.userChatInput] || ctx.userChatInput || "";
+
+  if (datasets.length === 0) {
+    return {
+      data: { [NodeOutputKeyEnum.datasetQuoteQA]: [] },
+      nodeResponse: {
+        nodeId: node.nodeId,
+        moduleName: node.name,
+        moduleType: node.flowNodeType,
+        query: userQuery,
+        total: 0,
+      },
+    };
+  }
+
+  const embeddingModel = datasets[0]?.vectorModel || process.env.DEFAULT_EMBEDDING_MODEL || "text-embedding-ada-002";
+  const vector = await getSingleEmbedding(embeddingModel, userQuery);
+  const datasetIds = datasets
+    .map((d: any) => (typeof d === "string" ? d : d?.datasetId || d?.id || d?._id))
+    .filter(Boolean);
+
+  const searchResults = await searchVectors({
+    teamId: ctx.userId,
+    vector,
+    topK: 20,
+    datasetIds,
+  });
+
+  const filteredResults = searchResults.filter((r: any) => r.score >= similarity);
+
+  await connectMongo();
+  const DatasetData = await getDatasetDataModel();
+  const dataIds = filteredResults.map((r: any) => r.dataId);
+  const dataRecords = await DatasetData.find({ _id: { $in: dataIds } }).lean();
+
+  const quoteQA = filteredResults
+    .map((r: any) => {
+      const data = dataRecords.find((d: any) => String(d._id) === r.dataId);
+      if (!data) return null;
+      return {
+        id: r.dataId,
+        q: data.q,
+        a: (data as any).a || "",
+        score: r.score,
+        datasetId: r.datasetId,
+        collectionId: r.collectionId,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, Math.max(1, Math.floor(limit / 500)));
+
+  return {
+    data: { [NodeOutputKeyEnum.datasetQuoteQA]: quoteQA },
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+      query: userQuery,
+      total: quoteQA.length,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Dataset Concat Node
+// ═══════════════════════════════════════════════
+
+async function dispatchDatasetConcat(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+  const maxLimit = params[NodeInputKeyEnum.datasetMaxTokens] ?? 5000;
+
+  const allQuotes: any[] = [];
+  for (const input of node.inputs) {
+    const value = params[input.key];
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item && item.q) {
+          const exists = allQuotes.find((q) => q.id === item.id);
+          if (!exists) allQuotes.push(item);
+        }
+      }
+    }
+  }
+
+  const merged = allQuotes
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, Math.floor(maxLimit / 500));
+
+  return {
+    data: { [NodeOutputKeyEnum.datasetQuoteQA]: merged },
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+      concatLength: merged.length,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Answer Node
+// ═══════════════════════════════════════════════
+
+async function dispatchAnswer(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  let text = params[NodeOutputKeyEnum.answerText] || "";
+
+  const quoteQA = ctx.variables[NodeOutputKeyEnum.datasetQuoteQA];
+  if (quoteQA && Array.isArray(quoteQA) && quoteQA.length > 0) {
+    const quoteText = quoteQA
+      .map((q: any, i: number) => `[${i + 1}] Q: ${q.q}\nA: ${q.a || ""}`)
+      .join("\n\n");
+    text = resolveVariableReference(text, {
+      ...ctx.variables,
+      quoteQA: quoteText,
+    });
+  }
+
+  return {
+    data: { [NodeOutputKeyEnum.answerText]: text },
+    answerText: text,
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Classify Question Node
+// ═══════════════════════════════════════════════
+
+async function dispatchClassifyQuestion(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const model = params[NodeInputKeyEnum.aiModel] || process.env.DEFAULT_LLM_MODEL || "gpt-3.5-turbo";
+  const systemPrompt = params[NodeInputKeyEnum.aiSystemPrompt] || "";
+  const userChatInput = params[NodeInputKeyEnum.userChatInput] || ctx.userChatInput || "";
+  const agents = params[NodeInputKeyEnum.agents] || [];
+  const history = params[NodeInputKeyEnum.history];
+
+  if (!userChatInput) {
+    return {
+      data: {},
+      error: { [NodeOutputKeyEnum.errorText]: "Input is empty" },
+      skipHandleId: agents.map((item: any) => `${node.nodeId}-source-${item.key}`),
+      nodeResponse: {
+        nodeId: node.nodeId,
+        moduleName: node.name,
+        moduleType: node.flowNodeType,
+        error: "Input is empty",
+      },
+    };
+  }
+
+  const optionsDesc = agents
+    .map((item: any) => `- ${item.key}: ${item.value}`)
+    .join("\n");
+
+  const classifyPrompt = `${systemPrompt || "请将用户问题分类到以下类别之一"}\n\n可选类别:\n${optionsDesc}\n\n请只回复类别 key, 不要额外文字。`;
+
+  const chatHistories = getHistories(history, ctx);
+  const messages: ChatMessage[] = [
+    { role: "system", content: classifyPrompt },
+    ...chatHistories.map((h) => ({
+      role: (h.obj === "Human" ? "user" : "assistant") as "user" | "assistant",
+      content: h.value,
+    })),
+    { role: "user", content: userChatInput },
+  ];
+
+  const result = await chatCompletion({
+    model,
+    messages,
+    temperature: 0.01,
+    max_tokens: 100,
+  });
+
+  const answer = (result.choices[0]?.message?.content || "").trim();
+  const matched = agents.find((item: any) => answer.includes(item.key)) || agents[agents.length - 1];
+  const cqResult = matched?.value || "";
+
+  return {
+    data: {
+      [NodeOutputKeyEnum.cqResult]: cqResult,
+    },
+    skipHandleId: agents
+      .filter((item: any) => item.key !== matched?.key)
+      .map((item: any) => `${node.nodeId}-source-${item.key}`),
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+      model,
+      query: userChatInput,
+      cqResult,
+      cqList: agents.map((item: any) => ({ key: item.key, value: item.value })),
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Content Extract Node
+// ═══════════════════════════════════════════════
+
+async function dispatchContentExtract(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const model = params[NodeInputKeyEnum.aiModel] || process.env.DEFAULT_LLM_MODEL || "gpt-3.5-turbo";
+  const content = params[NodeInputKeyEnum.userChatInput] || ctx.userChatInput || "";
+  const extractKeys = params[NodeInputKeyEnum.extractFields] || [];
+  const description = params["description" as string] || "";
+  const history = params[NodeInputKeyEnum.history];
+
+  if (!content) {
+    return {
+      data: {},
+      error: { [NodeOutputKeyEnum.errorText]: "Input is empty" },
+      skipHandleId: undefined,
+      nodeResponse: {
+        nodeId: node.nodeId,
+        moduleName: node.name,
+        moduleType: node.flowNodeType,
+        error: "Input is empty",
+      },
+    };
+  }
+
+  const fieldsDesc = extractKeys
+    .map((item: any) => `- ${item.key}: ${item.desc || ""}`)
+    .join("\n");
+
+  const extractPrompt = `Extract information from the text below. Return a JSON object with the following fields:
+
+${fieldsDesc}
+
+Return ONLY a valid JSON object, no markdown code blocks or explanation.`;
+
+  const chatHistories = getHistories(history, ctx);
+  const messages: ChatMessage[] = [
+    { role: "system", content: extractPrompt },
+    ...chatHistories.map((h) => ({
+      role: (h.obj === "Human" ? "user" : "assistant") as "user" | "assistant",
+      content: h.value,
+    })),
+    { role: "user", content },
+  ];
+
+  const result = await chatCompletion({
+    model,
+    messages,
+    temperature: 0.01,
+    max_tokens: 2000,
+  });
+
+  const rawText = result.choices[0]?.message?.content || "";
+  let extracted: Record<string, any> = {};
+
+  try {
+    const match = rawText.match(/\{[\s\S]*\}/);
+    if (match) {
+      extracted = JSON.parse(match[0]);
+    }
+  } catch {
+    extracted = {};
+  }
+
+  const success = extractKeys.every((item: any) => item.key in extracted) && !extractKeys.length;
+
+  return {
+    data: {
+      [NodeOutputKeyEnum.extractResult]: JSON.stringify(extracted),
+      ...extracted,
+    },
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+      model,
+      query: content,
+      extractResult: extracted,
+      extractDescription: description,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// If-Else Node
+// ═══════════════════════════════════════════════
+
+function evaluateCondition(a: string, condition: string, b: string): boolean {
+  switch (condition) {
+    case "eq": return String(a) === String(b);
+    case "neq": return String(a) !== String(b);
+    case "gt": return Number(a) > Number(b);
+    case "gte": return Number(a) >= Number(b);
+    case "lt": return Number(a) < Number(b);
+    case "lte": return Number(a) <= Number(b);
+    case "contains": return String(a).includes(String(b));
+    case "not_contains": return !String(a).includes(String(b));
+    case "empty": return !a || String(a).trim() === "";
+    case "notEmpty": return !!a && String(a).trim() !== "";
+    default: return false;
+  }
+}
+
+async function dispatchIfElse(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const ifElseList = params[NodeInputKeyEnum.ifElseList] || [];
+  const outgoingHandleIds = Array.from(
+    new Set(
+      ctx.runtimeEdges
+        .filter((edge) => edge.source === node.nodeId)
+        .map((edge) => edge.sourceHandle || "")
+        .filter(Boolean)
+    )
+  );
+
+  for (let i = 0; i < ifElseList.length; i++) {
+    const item = ifElseList[i];
+    const conditions: IfElseConditionType[] = item.conditions || [];
+    const logic = item.condition || "AND";
+
+    if (conditions.length === 0) continue;
+
+    const results = conditions.map((cond: IfElseConditionType) => {
+      const varValue = getVariableValue(ctx.variables, cond.variable) ?? "";
+      return evaluateCondition(String(varValue), cond.condition, cond.value);
+    });
+
+    const passed = logic === "AND" ? results.every(Boolean) : results.some(Boolean);
+
+    if (passed) {
+      const handleId = `ifElse-result-${i}`;
+      return {
+        data: { [NodeOutputKeyEnum.ifElseResult]: `IF_${i}` },
+        skipHandleId: outgoingHandleIds.filter((id) => id !== handleId),
+        nodeResponse: {
+          nodeId: node.nodeId,
+          moduleName: node.name,
+          moduleType: node.flowNodeType,
+        },
+      };
+    }
+  }
+
+  const defaultHandleId = "ifElse-else";
+  return {
+    data: { [NodeOutputKeyEnum.ifElseResult]: "ELSE" },
+    skipHandleId: outgoingHandleIds.filter((id) => id !== defaultHandleId),
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// HTTP Request Node
+// ═══════════════════════════════════════════════
+
+async function dispatchHttpRequest(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const url = params[NodeInputKeyEnum.httpReqUrl] || "";
+  const method = (params[NodeInputKeyEnum.httpMethod] || "GET").toUpperCase();
+  const headersInput = params[NodeInputKeyEnum.httpHeaders] || [];
+  const body = params[NodeInputKeyEnum.httpJsonBody];
+  const timeout = params[NodeInputKeyEnum.httpTimeout] || 30;
+
+  const headers: Record<string, string> = {};
+  for (const h of headersInput) {
+    if (h.key && h.value) headers[h.key] = h.value;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout * 1000);
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: method !== "GET" && body
+        ? (typeof body === "string" ? body : JSON.stringify(body))
+        : undefined,
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const text = await res.text();
+    let json: any;
+    try { json = JSON.parse(text); } catch { json = text; }
+
+    return {
+      data: { [NodeOutputKeyEnum.httpResult]: json },
+      nodeResponse: {
+        nodeId: node.nodeId,
+        moduleName: node.name,
+        moduleType: node.flowNodeType,
+        statusCode: res.status,
+        url,
+        method,
+      },
+    };
+  } catch (err) {
+    clearTimeout(timer);
+    return {
+      data: {},
+      error: { [NodeOutputKeyEnum.errorText]: `HTTP request failed: ${err instanceof Error ? err.message : String(err)}` },
+      nodeResponse: {
+        nodeId: node.nodeId,
+        moduleName: node.name,
+        moduleType: node.flowNodeType,
+        error: `HTTP request failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════
+// Code Node (Code Sandbox)
+// ═══════════════════════════════════════════════
+
+async function dispatchCode(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const code = params[NodeInputKeyEnum.code] || "";
+  const sandboxUrl = process.env.CODE_SANDBOX_URL;
+
+  if (!sandboxUrl) {
+    return {
+      data: {},
+      error: { [NodeOutputKeyEnum.errorText]: "Code sandbox is not configured" },
+      nodeResponse: {
+        nodeId: node.nodeId,
+        moduleName: node.name,
+        moduleType: node.flowNodeType,
+        error: "CODE_SANDBOX_URL is not configured",
+      },
+    };
+  }
+
+  const res = await fetch(`${sandboxUrl}/sandbox/js`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code,
+      variables: ctx.variables,
+    }),
+  });
+
+  if (!res.ok) {
+    return {
+      data: {},
+      error: { [NodeOutputKeyEnum.errorText]: `Code execution failed: ${res.status}` },
+      nodeResponse: {
+        nodeId: node.nodeId,
+        moduleName: node.name,
+        moduleType: node.flowNodeType,
+        error: `Code execution failed: ${res.status}`,
+      },
+    };
+  }
+
+  const result = await res.json();
+  return {
+    data: { [NodeOutputKeyEnum.codeResult]: result.result },
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Variable Update Node
+// ═══════════════════════════════════════════════
+
+async function dispatchVariableUpdate(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const updateList = params[NodeInputKeyEnum.variableUpdateList] || [];
+
+  for (const item of updateList) {
+    const varPath: string[] = item.variable || [];
+    const value = item.value;
+    if (varPath.length === 0) continue;
+
+    let current: any = ctx.variables;
+    for (let i = 0; i < varPath.length - 1; i++) {
+      if (!current[varPath[i]]) current[varPath[i]] = {};
+      current = current[varPath[i]];
+    }
+    current[varPath[varPath.length - 1]] = value;
+  }
+
+  return {
+    data: {},
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Text Editor Node
+// ═══════════════════════════════════════════════
+
+async function dispatchTextEditor(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const template = params[NodeInputKeyEnum.textEditorTemplate] || "";
+  const inputList = params[NodeInputKeyEnum.textEditorInputList] || [];
+
+  let result = template;
+  for (const item of inputList) {
+    const key = item.key || "";
+    const value = resolveVariableReference(String(item.value || ""), ctx.variables);
+    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
+  }
+
+  return {
+    data: { [NodeOutputKeyEnum.textEditorResult]: result },
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Read Files Node
+// ═══════════════════════════════════════════════
+
+async function dispatchReadFiles(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const fileUrlList: string[] = params[NodeInputKeyEnum.readFilesUrlList] || [];
+
+  if (fileUrlList.length === 0) {
+    return {
+      data: { [NodeOutputKeyEnum.fileContent]: "" },
+      nodeResponse: {
+        nodeId: node.nodeId,
+        moduleName: node.name,
+        moduleType: node.flowNodeType,
+        readFiles: [],
+      },
+    };
+  }
+
+  const results: Array<{ filename: string; url: string; content: string }> = [];
+
+  for (const url of fileUrlList.slice(0, 20)) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        results.push({ filename: url, url, content: `Failed to fetch: ${res.status}` });
+        continue;
+      }
+      const text = await res.text();
+      const filename = url.split("/").pop() || url;
+      results.push({ filename, url, content: text.slice(0, 50000) });
+    } catch (err) {
+      results.push({ filename: url, url, content: `Error: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
+  const combined = results
+    .map((r) => `File: ${r.filename}\n<Content>\n${r.content}\n</Content>`)
+    .join("\n\n******\n\n");
+
+  return {
+    data: { [NodeOutputKeyEnum.fileContent]: combined },
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+      readFiles: results.map((r) => ({ name: r.filename, url: r.url })),
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Agent Node (simplified - basic tool calling)
+// ═══════════════════════════════════════════════
+
+async function dispatchAgent(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const nodesMap = ctx.runtimeNodesMap;
+  const params = getNodeRunParams(ctx, node, ctx.variables, nodesMap);
+
+  const model = params[NodeInputKeyEnum.aiModel] || process.env.DEFAULT_LLM_MODEL || "gpt-3.5-turbo";
+  const systemPrompt = params[NodeInputKeyEnum.aiSystemPrompt] || "";
+  const userChatInput = params[NodeInputKeyEnum.userChatInput] || ctx.userChatInput || "";
+  const history = params[NodeInputKeyEnum.history];
+
+  const chatHistories = getHistories(history, ctx);
+  const messages: ChatMessage[] = [
+    { role: "system", content: systemPrompt || "You are a helpful AI assistant." },
+    ...chatHistories.map((h) => ({
+      role: (h.obj === "Human" ? "user" : "assistant") as "user" | "assistant",
+      content: h.value,
+    })),
+    { role: "user", content: userChatInput },
+  ];
+
+  const result = await chatCompletion({
+    model,
+    messages,
+    temperature: 0.7,
+    max_tokens: 4000,
+  });
+
+  const content = result.choices[0]?.message?.content || "";
+
+  return {
+    data: {
+      [NodeOutputKeyEnum.agentResponse]: content,
+      [NodeOutputKeyEnum.answerText]: content,
+    },
+    answerText: content,
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+      model,
+      tokens: result.usage?.total_tokens || 0,
+      query: userChatInput,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Form Input Node (interactive)
+// ═══════════════════════════════════════════════
+
+async function dispatchFormInput(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const params = getNodeRunParams(ctx, node, ctx.variables, ctx.runtimeNodesMap);
+
+  const userInputForms = params["userInputForms"] || [];
+  const description = params["description"] || "";
+
+  return {
+    data: {},
+    interactive: {
+      type: "formInput",
+      params: { description, inputForm: userInputForms },
+    },
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// User Select Node (interactive)
+// ═══════════════════════════════════════════════
+
+async function dispatchUserSelect(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const params = getNodeRunParams(ctx, node, ctx.variables, ctx.runtimeNodesMap);
+
+  const userSelectOptions = params["userSelectOptions"] || [];
+  const description = params["description"] || "";
+
+  return {
+    data: {},
+    interactive: {
+      type: "userSelect",
+      params: { description, userSelectOptions },
+    },
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Custom Feedback Node
+// ═══════════════════════════════════════════════
+
+async function dispatchCustomFeedback(props: ModuleDispatchProps): Promise<NodeDispatchResult> {
+  const { ctx, node } = props;
+  const params = getNodeRunParams(ctx, node, ctx.variables, ctx.runtimeNodesMap);
+
+  const feedbackText = params["feedbackText"] || "Workflow execution completed successfully.";
+
+  return {
+    data: { [NodeOutputKeyEnum.customFeedbackResult]: feedbackText },
+    customFeedbacks: [feedbackText],
+    nodeResponse: {
+      nodeId: node.nodeId,
+      moduleName: node.name,
+      moduleType: node.flowNodeType,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// Dispatch Map
+// ═══════════════════════════════════════════════
+
+export const dispatchMap: Record<string, HandlerFn> = {
+  [FlowNodeTypeEnum.workflowStart]: dispatchWorkflowStart,
+  [FlowNodeTypeEnum.systemConfig]: dispatchSystemConfig,
+  [FlowNodeTypeEnum.emptyNode]: dispatchNoop,
+  [FlowNodeTypeEnum.comment]: dispatchNoop,
+  [FlowNodeTypeEnum.globalVariable]: dispatchNoop,
+
+  [FlowNodeTypeEnum.chatNode]: dispatchChatNode,
+  [FlowNodeTypeEnum.answerNode]: dispatchAnswer,
+  [FlowNodeTypeEnum.datasetSearchNode]: dispatchDatasetSearch,
+  [FlowNodeTypeEnum.datasetConcatNode]: dispatchDatasetConcat,
+
+  [FlowNodeTypeEnum.agent]: dispatchAgent,
+  [FlowNodeTypeEnum.classifyQuestion]: dispatchClassifyQuestion,
+  [FlowNodeTypeEnum.contentExtract]: dispatchContentExtract,
+
+  [FlowNodeTypeEnum.httpRequest468]: dispatchHttpRequest,
+  [FlowNodeTypeEnum.code]: dispatchCode,
+  [FlowNodeTypeEnum.textEditor]: dispatchTextEditor,
+  [FlowNodeTypeEnum.readFiles]: dispatchReadFiles,
+
+  [FlowNodeTypeEnum.ifElseNode]: dispatchIfElse,
+  [FlowNodeTypeEnum.variableUpdate]: dispatchVariableUpdate,
+
+  [FlowNodeTypeEnum.formInput]: dispatchFormInput,
+  [FlowNodeTypeEnum.userSelect]: dispatchUserSelect,
+  [FlowNodeTypeEnum.customFeedback]: dispatchCustomFeedback,
+};

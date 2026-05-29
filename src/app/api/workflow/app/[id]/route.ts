@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { handleApiError } from "@/lib/api";
 import { requireWorkflowPermission } from "@/lib/auth/fastgpt-auth";
 import { getAppModel } from "@/lib/models/app";
+import { normalizeWorkflowModules } from "@/lib/workflow/schema";
 
 export async function GET(
   _request: Request,
@@ -29,7 +30,7 @@ export async function GET(
       type: app.type,
       avatar: app.avatar,
       intro: app.intro,
-      modules: app.modules,
+      modules: normalizeWorkflowModules(JSON.parse(JSON.stringify(app.modules || []))),
       edges: app.edges,
       chatConfig: app.chatConfig,
       updateTime: app.updateTime,
@@ -78,7 +79,7 @@ export async function PUT(
     }
 
     if (modules !== undefined) {
-      updateData.modules = modules;
+      updateData.modules = normalizeWorkflowModules(JSON.parse(JSON.stringify(modules)));
     }
 
     if (edges !== undefined) {
@@ -101,7 +102,7 @@ export async function PUT(
       type: updatedApp!.type,
       avatar: updatedApp!.avatar,
       intro: updatedApp!.intro,
-      modules: updatedApp!.modules,
+      modules: normalizeWorkflowModules(JSON.parse(JSON.stringify(updatedApp!.modules || []))),
       edges: updatedApp!.edges,
       chatConfig: updatedApp!.chatConfig,
       updateTime: updatedApp!.updateTime,

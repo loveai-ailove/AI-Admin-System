@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { FlowCanvas } from "./Flow";
-import { ChatTestPanel } from "./ChatTest";
+import { DebugInspector } from "./DebugInspector";
 
 interface AppDetail {
   id: string;
@@ -21,6 +21,7 @@ export function WorkflowEditor({ appId }: { appId: string }) {
   const [showDebug, setShowDebug] = useState(false);
   const [nodes, setNodes] = useState<any[]>([]);
   const [edges, setEdges] = useState<any[]>([]);
+  const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -103,11 +104,11 @@ export function WorkflowEditor({ appId }: { appId: string }) {
       </div>
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1">
-          <FlowCanvas nodes={nodes} edges={edges} onNodesChange={setNodes} onEdgesChange={setEdges} />
+          <FlowCanvas nodes={nodes} edges={edges} onNodesChange={setNodes} onEdgesChange={setEdges} highlightNodeId={highlightNodeId} />
         </div>
         {showDebug && (
-          <div className="w-96 border-l border-gray-200">
-            <ChatTestPanel appId={appId} nodes={nodes} edges={edges} />
+          <div className="w-96 flex-shrink-0 border-l border-gray-200">
+            <DebugInspector appId={appId} nodes={nodes} edges={edges} onHighlightNode={setHighlightNodeId} />
           </div>
         )}
       </div>

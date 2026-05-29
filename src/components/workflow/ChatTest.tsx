@@ -6,6 +6,8 @@ interface Message {
   obj: "Human" | "AI";
   value: string;
   nodeResponses?: any[];
+  interactiveResponse?: any;
+  executionLogs?: any[];
 }
 
 export function ChatTestPanel({
@@ -50,12 +52,17 @@ export function ChatTestPanel({
 
       if (res.ok) {
         const data = await res.json();
+        const interactiveText = data.interactiveResponse
+          ? `等待交互: ${data.interactiveResponse.type === "formInput" ? "表单输入" : data.interactiveResponse.type === "userSelect" ? "用户选择" : "继续处理"}`
+          : "（无输出）";
         setMessages((prev) => [
           ...prev,
           {
             obj: "AI",
-            value: data.outputText || "（无输出）",
+            value: data.outputText || interactiveText,
             nodeResponses: data.nodeResponses,
+            interactiveResponse: data.interactiveResponse,
+            executionLogs: data.executionLogs,
           },
         ]);
         if (data.chatId) setChatId(data.chatId);
@@ -98,10 +105,34 @@ export function ChatTestPanel({
                   <div className="text-xs text-gray-400 mb-1">执行节点:</div>
                   {msg.nodeResponses.map((nr: any, j: number) => (
                     <div key={j} className="text-xs text-gray-500">
-                      ✅ {nr.nodeType}
-                      {nr.responseData?.error && <span className="text-red-400"> - {nr.responseData.error}</span>}
+                      {nr.error ? "❌" : "✅"} {nr.moduleName || nr.moduleType || nr.nodeType || "未知节点"}
+                      {nr.error && <span className="text-red-400"> - {nr.error}</span>}
                     </div>
                   ))}
+                </div>
+              )}
+              {msg.interactiveResponse && (
+                <div className="mt-2 rounded-md bg-white/70 p-2 text-xs text-gray-600">
+                  <div className="font-medium text-gray-700">交互节点已暂停</div>
+                  <div className="mt-1">
+                    类型: {msg.interactiveResponse.type === "formInput" ? "表单输入" : "用户选择"}
+                  </div>
+                  {msg.interactiveResponse.params?.description && (
+                    <div className="mt-1 whitespace-pre-wrap">{msg.interactiveResponse.params.description}</div>
+                  )}
+                </div>
+              )}
+              {msg.executionLogs && msg.executionLogs.length > 0 && (
+                <div className="mt-2 border-t border-gray-200 pt-2">
+                  <div className="mb-1 text-xs text-gray-400">执行日志:</div>
+                  <div className="max-h-32 space-y-1 overflow-y-auto rounded-md bg-white/70 p-2">
+                    {msg.executionLogs.map((log: any, index: number) => (
+                      <div key={index} className="text-xs text-gray-600">
+                        [{log.status}] {log.moduleName || log.nodeId}
+                        {log.message ? ` - ${log.message}` : ""}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

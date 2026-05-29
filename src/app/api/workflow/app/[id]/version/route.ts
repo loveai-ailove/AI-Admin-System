@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { handleApiError } from "@/lib/api";
 import { requireWorkflowPermission } from "@/lib/auth/fastgpt-auth";
 import { getAppModel, getWorkflowVersionModel } from "@/lib/models/app";
+import { normalizeWorkflowModules } from "@/lib/workflow/schema";
 
 export async function GET(
   _request: Request,
@@ -69,7 +70,9 @@ export async function POST(
       throw new Error("NOT_FOUND");
     }
 
-    const nextModules = modules !== undefined ? modules : app.modules;
+    const nextModules = normalizeWorkflowModules(
+      JSON.parse(JSON.stringify(modules !== undefined ? modules : app.modules || []))
+    );
     const nextEdges = edges !== undefined ? edges : app.edges;
     const nextChatConfig = chatConfig !== undefined ? chatConfig : app.chatConfig;
 

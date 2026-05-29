@@ -1,38 +1,54 @@
 export enum FlowNodeTypeEnum {
   workflowStart = "workflowStart",
+  systemConfig = "systemConfig",
+  emptyNode = "emptyNode",
+  comment = "comment",
+  globalVariable = "globalVariable",
+
   chatNode = "chatNode",
-  datasetSearchNode = "datasetSearchNode",
   answerNode = "answerNode",
+  datasetSearchNode = "datasetSearchNode",
+  datasetConcatNode = "datasetConcatNode",
+
+  agent = "agent",
   classifyQuestion = "classifyQuestion",
   contentExtract = "contentExtract",
-  httpRequest468 = "httpRequest468",
-  ifElseNode = "ifElseNode",
-  variableUpdate = "variableUpdate",
-  code = "code",
-  textEditor = "textEditor",
-  customFeedback = "customFeedback",
   queryExtension = "cfr",
-  agent = "agent",
+
   toolCall = "tools",
   stopTool = "stopTool",
   toolParams = "toolParams",
-  answer = "answerNode",
-  appModule = "appModule",
-  pluginModule = "pluginModule",
-  pluginInput = "pluginInput",
-  pluginOutput = "pluginOutput",
+  httpRequest468 = "httpRequest468",
+  code = "code",
+  textEditor = "textEditor",
+  readFiles = "readFiles",
+
+  ifElseNode = "ifElseNode",
+  variableUpdate = "variableUpdate",
   loop = "loop",
   parallelRun = "parallelRun",
   nestedStart = "nestedStart",
   nestedEnd = "nestedEnd",
+
   formInput = "formInput",
   userSelect = "userSelect",
-  readFiles = "readFiles",
-  datasetConcatNode = "datasetConcatNode",
+  customFeedback = "customFeedback",
+
+  appModule = "appModule",
+  pluginModule = "pluginModule",
+  pluginInput = "pluginInput",
+  pluginOutput = "pluginOutput",
   tool = "tool",
-  systemConfig = "userGuide",
-  emptyNode = "emptyNode",
-  comment = "comment",
+  toolSet = "toolSet",
+
+  /** @deprecated */
+  answer = "answerNode",
+  /** @deprecated */
+  lafModule = "lafModule",
+  /** @deprecated */
+  runApp = "app",
+  /** @deprecated */
+  pluginConfig = "pluginConfig",
 }
 
 export enum FlowNodeInputTypeEnum {
@@ -58,6 +74,19 @@ export enum FlowNodeInputTypeEnum {
 
 export enum NodeInputKeyEnum {
   userChatInput = "userChatInput",
+  history = "history",
+  isResponseAnswerText = "isResponseAnswerText",
+  aiChatVision = "aiChatVision",
+  aiChatReasoning = "aiChatReasoning",
+  aiChatTopP = "aiChatTopP",
+  aiChatStopSign = "aiChatStopSign",
+  aiChatResponseFormat = "aiChatResponseFormat",
+  aiChatJsonSchema = "aiChatJsonSchema",
+  aiChatFileUrlList = "fileUrlList",
+  aiChatQuoteRole = "aiChatQuoteRole",
+  aiChatQuoteTemplate = "aiChatQuoteTemplate",
+  aiChatQuotePrompt = "aiChatQuotePrompt",
+
   datasetSelectList = "datasets",
   datasetSimilarity = "similarity",
   datasetMaxTokens = "limit",
@@ -71,10 +100,7 @@ export enum NodeInputKeyEnum {
   datasetSearchExtensionBg = "extensionBg",
   collectionFilterMatch = "collectionFilterMatch",
   authTmbId = "authTmbId",
-  datasetDeepSearch = "datasetDeepSearch",
-  datasetDeepSearchModel = "datasetDeepSearchModel",
-  datasetDeepSearchMaxTimes = "datasetDeepSearchMaxTimes",
-  datasetDeepSearchBg = "datasetDeepSearchBg",
+
   httpReqUrl = "system_httpReqUrl",
   httpMethod = "system_httpMethod",
   httpHeaders = "system_httpHeader",
@@ -82,26 +108,51 @@ export enum NodeInputKeyEnum {
   httpContentType = "system_httpContentType",
   httpTimeout = "system_httpTimeout",
   httpStatusCode = "system_httpCode",
+
   ifElseList = "ifElseList",
   variableUpdateList = "variableUpdateList",
+
   code = "system_code",
   codeType = "system_codeType",
+
   textEditorInputList = "system_textEditorInputList",
   textEditorTemplate = "system_textEditorTemplate",
+
   aiModel = "model",
   aiSystemPrompt = "system_chat_prompt",
   aiTemperature = "temperature",
   aiMaxToken = "maxToken",
+
+  agents = "agents",
+  extractFields = "extractFields",
+  extractModel = "extractModel",
+
+  loopInput = "loopInput",
+  loopMaxConcurrency = "loopMaxConcurrency",
+
+  childrenNodeIdList = "childrenNodeIdList",
+  readFilesUrlList = "readFilesUrlList",
 }
 
 export enum NodeOutputKeyEnum {
   answerText = "answerText",
+  reasoningText = "reasoningText",
   datasetQuoteQA = "quoteQA",
   httpResult = "httpResult",
   ifElseResult = "ifElseResult",
   codeResult = "codeResult",
   textEditorResult = "textEditorResult",
   agentResponse = "agentResponse",
+  cqResult = "cqResult",
+  extractResult = "extractResult",
+  queryExtensionResult = "queryExtensionResult",
+  history = "history",
+  errorText = "errorText",
+  customFeedbackResult = "customFeedbackResult",
+  userSelectResult = "userSelectResult",
+  formInputResult = "formInputResult",
+  fileContent = "fileContent",
+  datasetConcatResult = "datasetConcatResult",
 }
 
 export enum WorkflowIOValueTypeEnum {
@@ -130,10 +181,13 @@ export enum DispatchNodeResponseKeyEnum {
 export enum SseResponseEventEnum {
   answer = "answer",
   flowNodeStatus = "flowNodeStatus",
+  flowNodeResponse = "flowNodeResponse",
   toolCall = "toolCall",
+  toolParams = "toolParams",
   toolResponse = "toolResponse",
   updateVariables = "updateVariables",
   interactive = "interactive",
+  workflowDuration = "workflowDuration",
 }
 
 export interface IfElseConditionType {
@@ -153,6 +207,9 @@ export interface WorkflowNodeItemType {
   intro: string;
   flowNodeType: FlowNodeTypeEnum;
   showStatus?: boolean;
+  version?: string;
+  avatar?: string;
+  catchError?: boolean;
   position: { x: number; y: number };
   inputs: Array<{
     key: string;
@@ -162,6 +219,7 @@ export interface WorkflowNodeItemType {
     label?: string;
     description?: string;
     type?: FlowNodeInputTypeEnum;
+    renderTypeList?: FlowNodeInputTypeEnum[];
     list?: Array<{ label: string; value: string }>;
     required?: boolean;
     selectedTypeIndex?: number;
